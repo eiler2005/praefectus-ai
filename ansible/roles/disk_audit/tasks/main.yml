@@ -1,0 +1,110 @@
+---
+# Read-only сбор данных о диске. Безопасно запускать в любой момент.
+# Регистрирует факты для последующих ролей и опционально пишет отчёт в reports/.
+
+- name: "audit | df -h /"
+  ansible.builtin.command: df -BM --output=target,size,used,avail,pcent /
+  register: audit_df_root
+  changed_when: false
+  check_mode: false
+
+- name: "audit | parse df output"
+  ansible.builtin.set_fact:
+    audit_disk_used_pct: "{{ audit_df_root.stdout_lines[1].split()[-1] | regex_replace('%', '') | int }}"
+    audit_disk_size_mb: "{{ audit_df_root.stdout_lines[1].split()[1] | regex_replace('M', '') | int }}"
+    audit_disk_used_mb: "{{ audit_df_root.stdout_lines[1].split()[2] | regex_replace('M', '') | int }}"
+    audit_disk_avail_mb: "{{ audit_df_root.stdout_lines[1].split()[3] | regex_replace('M', '') | int }}"
+
+- name: "audit | top {{ audit_top_dirs }} directories by size in monitored paths"
+  ansible.builtin.shell: |
+    set -o pipefail
+    du -sh {{ audit_paths | join(' ') }} 2>/dev/null \
+      | sort -hr \
+      | head -n {{ audit_top_dirs }}
+  args:
+    executable: /bin/bash
+  register: audit_top_du
+  changed_when: false
+  check_mode: false
+  failed_when: false  # некоторые пути могут отсутствовать на свежей VM
+
+- name: "audit | top {{ audit_top_files }} files larger than {{ audit_min_file_size_mb }}M"
+  ansible.builtin.shell: |
+    set -o pipefail
+    find / -xdev -type f -size +{{ audit_min_file_size_mb }}M 2>/dev/null \
+      | head -n {{ audit_top_files }}
+  args:
+    executable: /bin/bash
+  register: audit_large_files
+  changed_when: false
+  check_mode: false
+  failed_when: false
+
+- name: "audit | docker system df"
+  ansible.builtin.command: docker system df
+  register: audit_docker_df
+  changed_when: false
+  check_mode: false
+  failed_when: false  # docker может быть не установлен (свежая VM)
+
+- name: "audit | journal disk usage"
+  ansible.builtin.command: journalctl --disk-usage
+  register: audit_journal_usage
+  changed_when: false
+  check_mode: false
+  failed_when: false
+
+- name: "audit | apt cache size"
+  ansible.builtin.shell: |
+    set -o pipefail
+    du -sh /var/cache/apt/archives 2>/dev/null || echo "0"
+  args:
+    executable: /bin/bash
+  register: audit_apt_cache
+  changed_when: false
+  check_mode: false
+
+- name: "audit | display summary"
+  ansible.builtin.debug:
+    msg:
+      - "=== DISK AUDIT — {{ inventory_hostname }} ==="
+      - "Disk /: {{ audit_disk_used_pct }}% used ({{ audit_disk_used_mb }}M / {{ audit_disk_size_mb }}M, {{ audit_disk_avail_mb }}M free)"
+      - "Apt cache: {{ audit_apt_cache.stdout | default('n/a') }}"
+      - "Journal: {{ audit_journal_usage.stdout | default('n/a') }}"
+      - "--- Top directories ---"
+      - "{{ audit_top_du.stdout_lines | default([]) }}"
+      - "--- Docker disk ---"
+      - "{{ audit_docker_df.stdout_lines | default(['docker not installed']) }}"
+      - "--- Large files (>{{ audit_min_file_size_mb }}M) ---"
+      - "{{ audit_large_files.stdout_lines | default([]) }}"
+
+- name: "audit | save report to local reports/"
+  ansible.builtin.copy:
+    dest: "{{ report_dir_local }}/disk-audit-{{ ansible_date_time.iso8601_basic_short }}.md"
+    content: |
+      # Disk audit — {{ inventory_hostname }} — {{ ansible_date_time.iso8601 }}
+
+      ## Summary
+      - **Disk /**: {{ audit_disk_used_pct }}% used ({{ audit_disk_used_mb }}M / {{ audit_disk_size_mb }}M, {{ audit_disk_avail_mb }}M free)
+      - **Apt cache**: {{ audit_apt_cache.stdout | default('n/a') }}
+      - **Journal**: {{ audit_journal_usage.stdout | default('n/a') }}
+
+      ## Top {{ audit_top_dirs }} directories
+      ```
+      {{ audit_top_du.stdout | default('') }}
+      ```
+
+      ## Docker disk usage
+      ```
+      {{ audit_docker_df.stdout | default('docker not installed') }}
+      ```
+
+      ## Large files (>{{ audit_min_file_size_mb }}M)
+      ```
+      {{ audit_large_files.stdout | default('none') }}
+      ```
+    mode: "0644"
+  delegate_to: localhost
+  become: false
+  when: audit_save_report | bool
+  check_mode: false

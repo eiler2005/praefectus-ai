@@ -1,0 +1,8 @@
+# Это пример. Реальный vault password живёт в ~/.vault_pass.txt (mode 0600), НЕ в репо.
+#
+# Создание:
+#   pwgen -s 32 1 > ~/.vault_pass.txt
+#   chmod 600 ~/.vault_pass.txt
+#
+# Бэкап: положить в 1Password (запись "vps_management ansible vault password").
+# Без бэкапа потеря пароля = потеря доступа к vault.yml без возможности восстановления.

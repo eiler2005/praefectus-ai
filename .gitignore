@@ -1,0 +1,35 @@
+# Vault password — никогда не должен попасть в git
+.vault_pass.txt
+.vault_pass*
+!.vault_pass.example
+
+# Local secrets (fallback) — основное место хранения = ansible/secrets/vault.yml (encrypted)
+/secrets/*
+!/secrets/.gitkeep
+
+# Local-only verify/audit reports
+/reports/*
+!/reports/.gitkeep
+
+# Ansible artifacts
+ansible/*.retry
+ansible/collections/
+ansible/.cache/
+ansible/secrets/*.backup-*
+
+# Inventory с реальными значениями (используем только vault-driven inventory)
+ansible/inventory/*.local.yml
+
+# IDE / OS
+.DS_Store
+.vscode/
+.idea/
+*.swp
+*~
+.claude/
+
+# Python (если появятся скрипты)
+__pycache__/
+*.pyc
+.venv/
+venv/

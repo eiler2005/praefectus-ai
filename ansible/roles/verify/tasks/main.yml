@@ -1,0 +1,230 @@
+---
+# Read-only health gate. Никаких изменений на хосте.
+# Собирает 12 проверок, классифицирует ok/warn/fail, пишет отчёт в reports/.
+
+- name: "verify | init result accumulator"
+  ansible.builtin.set_fact:
+    verify_results: []
+
+# === 1. SSH reachability — уже доказано фактом успешного gather_facts ===
+- name: "verify | 1) ssh reachability"
+  ansible.builtin.set_fact:
+    verify_results: "{{ verify_results + [{'check': 'ssh', 'status': 'ok', 'detail': 'connected'}] }}"
+
+# === 2. Disk usage / ===
+- name: "verify | 2a) df /"
+  ansible.builtin.command: df -BM --output=pcent /
+  register: vfy_df
+  changed_when: false
+  check_mode: false
+
+- name: "verify | 2b) classify disk"
+  ansible.builtin.set_fact:
+    vfy_disk_pct: "{{ vfy_df.stdout_lines[1] | regex_replace('[^0-9]', '') | int }}"
+
+- name: "verify | 2c) record disk"
+  ansible.builtin.set_fact:
+    verify_results: >-
+      {{ verify_results + [{
+        'check': 'disk',
+        'status': (
+          'fail' if vfy_disk_pct | int >= verify_disk_crit_pct | int
+          else 'warn' if vfy_disk_pct | int >= verify_disk_warn_pct | int
+          else 'ok'
+        ),
+        'detail': vfy_disk_pct ~ '% used / warn=' ~ verify_disk_warn_pct ~ '% crit=' ~ verify_disk_crit_pct ~ '%'
+      }] }}
+
+# === 3. Memory ===
+- name: "verify | 3a) free -m"
+  ansible.builtin.shell: |
+    set -o pipefail
+    free -m | awk '/^Mem:/ {print $7}'
+  args:
+    executable: /bin/bash
+  register: vfy_free
+  changed_when: false
+  check_mode: false
+
+- name: "verify | 3b) classify memory"
+  ansible.builtin.set_fact:
+    vfy_mem_avail_mb: "{{ vfy_free.stdout | trim | int }}"
+
+- name: "verify | 3c) record memory"
+  ansible.builtin.set_fact:
+    verify_results: >-
+      {{ verify_results + [{
+        'check': 'memory',
+        'status': (
+          'fail' if vfy_mem_avail_mb | int <= verify_mem_crit_mb | int
+          else 'warn' if vfy_mem_avail_mb | int <= verify_mem_warn_mb | int
+          else 'ok'
+        ),
+        'detail': vfy_mem_avail_mb ~ 'M available / warn<=' ~ verify_mem_warn_mb ~ 'M crit<=' ~ verify_mem_crit_mb ~ 'M'
+      }] }}
+
+# === 4. Load avg 5min ===
+- name: "verify | 4a) loadavg"
+  ansible.builtin.command: cat /proc/loadavg
+  register: vfy_loadavg
+  changed_when: false
+  check_mode: false
+
+- name: "verify | 4b) classify load"
+  ansible.builtin.set_fact:
+    vfy_load_5: "{{ vfy_loadavg.stdout.split()[1] | float }}"
+
+- name: "verify | 4c) record load"
+  ansible.builtin.set_fact:
+    verify_results: >-
+      {{ verify_results + [{
+        'check': 'load_5min',
+        'status': (
+          'fail' if vfy_load_5 | float >= verify_loadavg_crit | float
+          else 'warn' if vfy_load_5 | float >= verify_loadavg_warn | float
+          else 'ok'
+        ),
+        'detail': vfy_load_5 ~ ' / warn>=' ~ verify_loadavg_warn ~ ' crit>=' ~ verify_loadavg_crit
+      }] }}
+
+# === 5. Docker daemon ===
+- name: "verify | 5a) systemctl is-active docker"
+  ansible.builtin.command: systemctl is-active docker
+  register: vfy_docker_active
+  changed_when: false
+  failed_when: false
+  check_mode: false
+
+- name: "verify | 5b) record docker daemon"
+  ansible.builtin.set_fact:
+    verify_results: >-
+      {{ verify_results + [{
+        'check': 'docker_daemon',
+        'status': ('ok' if vfy_docker_active.stdout == 'active' else 'fail'),
+        'detail': vfy_docker_active.stdout
+      }] }}
+
+# === 6+7. Containers — running + healthcheck ===
+- name: "verify | 6a) docker ps (running containers)"
+  ansible.builtin.command: docker ps --format '{{ "{{" }}.Names{{ "}}" }}'
+  register: vfy_docker_ps
+  changed_when: false
+  failed_when: false
+  check_mode: false
+  when:
+    - verify_check_containers | bool
+    - vfy_docker_active.stdout == 'active'
+
+- name: "verify | 6b) parse running containers"
+  ansible.builtin.set_fact:
+    vfy_running_containers: "{{ vfy_docker_ps.stdout_lines | default([]) }}"
+
+- name: "verify | 6c) check expected containers running"
+  ansible.builtin.set_fact:
+    verify_results: >-
+      {{ verify_results + [{
+        'check': 'container_running:' ~ item.name,
+        'status': ('ok' if item.name in vfy_running_containers else 'fail'),
+        'detail': ('owner=' ~ item.owner ~ ' running' if item.name in vfy_running_containers else 'owner=' ~ item.owner ~ ' NOT RUNNING')
+      }] }}
+  loop: "{{ vault_expected_containers | default([]) }}"
+  loop_control:
+    label: "{{ item.name }}"
+  when: verify_check_containers | bool
+
+# === 7. Container healthchecks (для running контейнеров) ===
+- name: "verify | 7) container healthchecks"
+  ansible.builtin.include_tasks: healthcheck.yml
+  loop: "{{ vault_expected_containers | default([]) }}"
+  loop_control:
+    loop_var: hc_item
+    label: "{{ hc_item.name }}"
+  when:
+    - verify_check_containers | bool
+    - hc_item.name in vfy_running_containers
+
+# === 8. UFW status (опционально, не fail если не установлен) ===
+- name: "verify | 8a) ufw status"
+  ansible.builtin.command: ufw status
+  become: true
+  register: vfy_ufw
+  changed_when: false
+  failed_when: false
+  check_mode: false
+
+- name: "verify | 8b) record ufw"
+  ansible.builtin.set_fact:
+    verify_results: >-
+      {{ verify_results + [{
+        'check': 'ufw',
+        'status': (
+          'ok' if 'Status: active' in (vfy_ufw.stdout | default(''))
+          else 'warn' if vfy_ufw.rc == 0
+          else 'warn'
+        ),
+        'detail': (vfy_ufw.stdout_lines[0] | default('not installed'))
+      }] }}
+
+# === 9. Expected app dirs sanity ===
+- name: "verify | 9a) check expected app dirs"
+  ansible.builtin.stat:
+    path: "{{ item }}"
+  register: vfy_app_dirs
+  loop: "{{ expected_app_dirs }}"
+
+- name: "verify | 9b) record app dirs"
+  ansible.builtin.set_fact:
+    verify_results: >-
+      {{ verify_results + [{
+        'check': 'app_dir:' ~ item.item,
+        'status': ('ok' if item.stat.exists else 'warn'),
+        'detail': ('exists' if item.stat.exists else 'MISSING')
+      }] }}
+  loop: "{{ vfy_app_dirs.results }}"
+  loop_control:
+    label: "{{ item.item }}"
+
+# === Summary ===
+- name: "verify | summary counts"
+  ansible.builtin.set_fact:
+    vfy_count_ok: "{{ verify_results | selectattr('status', 'equalto', 'ok') | list | length }}"
+    vfy_count_warn: "{{ verify_results | selectattr('status', 'equalto', 'warn') | list | length }}"
+    vfy_count_fail: "{{ verify_results | selectattr('status', 'equalto', 'fail') | list | length }}"
+
+- name: "verify | display summary"
+  ansible.builtin.debug:
+    msg:
+      - "=== VERIFY SUMMARY — {{ inventory_hostname }} ==="
+      - "OK:   {{ vfy_count_ok }}"
+      - "WARN: {{ vfy_count_warn }}"
+      - "FAIL: {{ vfy_count_fail }}"
+      - "--- Details ---"
+      - "{{ verify_results | map('to_nice_yaml') | list }}"
+
+- name: "verify | save report"
+  ansible.builtin.copy:
+    dest: "{{ report_dir_local }}/verify-{{ ansible_date_time.iso8601_basic_short }}.md"
+    content: |
+      # Verify report — {{ inventory_hostname }} — {{ ansible_date_time.iso8601 }}
+
+      ## Summary
+      - **OK**:   {{ vfy_count_ok }}
+      - **WARN**: {{ vfy_count_warn }}
+      - **FAIL**: {{ vfy_count_fail }}
+
+      ## Checks
+      | Check | Status | Detail |
+      |---|---|---|
+      {% for r in verify_results %}
+      | {{ r.check }} | {{ r.status | upper }} | {{ r.detail }} |
+      {% endfor %}
+    mode: "0644"
+  delegate_to: localhost
+  become: false
+  when: verify_save_report | bool
+  check_mode: false
+
+- name: "verify | fail on FAIL count > 0"
+  ansible.builtin.fail:
+    msg: "{{ vfy_count_fail }} check(s) FAILED. See report above."
+  when: vfy_count_fail | int > 0

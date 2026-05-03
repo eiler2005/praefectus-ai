@@ -1,0 +1,90 @@
+#!/usr/bin/env bash
+# disk-report — standalone отчёт по диску VPS (без ansible).
+# Читает host из vault, ходит SSH, собирает df/du/docker df, печатает + сохраняет в reports/.
+#
+# Использование:
+#   ./modules/disk-observatory/bin/disk-report
+#   ./modules/disk-observatory/bin/disk-report --no-save  (только stdout, без файла)
+
+set -euo pipefail
+
+REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../../.." && pwd)"
+VAULT_FILE="${REPO_ROOT}/ansible/group_vars/all/vault.yml"
+REPORTS_DIR="${REPO_ROOT}/reports"
+
+SAVE_REPORT=1
+if [[ "${1:-}" == "--no-save" ]]; then
+  SAVE_REPORT=0
+fi
+
+if [[ ! -f "${VAULT_FILE}" ]]; then
+  echo "ERROR: vault not found at ${VAULT_FILE}" >&2
+  echo "       Copy ansible/secrets/vault.yml.example → vault.yml, fill values, ansible-vault encrypt." >&2
+  exit 2
+fi
+
+# Получаем host/user/port из vault
+VAULT_CONTENT=$(ansible-vault view "${VAULT_FILE}")
+VPS_HOST=$(echo "${VAULT_CONTENT}" | awk -F'"' '/^vault_vps_ssh_host:/ {print $2; exit}')
+VPS_USER=$(echo "${VAULT_CONTENT}" | awk -F'"' '/^vault_vps_ssh_user:/ {print $2; exit}')
+VPS_PORT=$(echo "${VAULT_CONTENT}" | awk '/^vault_vps_ssh_port:/ {print $2; exit}')
+VPS_PORT="${VPS_PORT:-22}"
+
+if [[ -z "${VPS_HOST}" || -z "${VPS_USER}" ]]; then
+  echo "ERROR: vault_vps_ssh_host or vault_vps_ssh_user not set in vault" >&2
+  exit 2
+fi
+
+SSH_OPTS=(-p "${VPS_PORT}" -o ConnectTimeout=10 -o ServerAliveInterval=15)
+
+# Запускаем удалённый сбор данных
+REMOTE_REPORT=$(ssh "${SSH_OPTS[@]}" "${VPS_USER}@${VPS_HOST}" 'bash -s' <<'REMOTE_EOF'
+set -euo pipefail
+echo "## df -h /"
+df -h /
+echo
+echo "## free -h"
+free -h
+echo
+echo "## /proc/loadavg"
+cat /proc/loadavg
+echo
+echo "## du -sh top dirs"
+du -sh /var/log /var/lib/docker /var/cache /opt/* /home/* 2>/dev/null | sort -hr | head -20
+echo
+echo "## docker system df"
+docker system df 2>/dev/null || echo "docker not installed or not accessible"
+echo
+echo "## journalctl --disk-usage"
+journalctl --disk-usage 2>/dev/null || echo "journalctl unavailable"
+echo
+echo "## apt cache"
+du -sh /var/cache/apt/archives 2>/dev/null || echo "0"
+echo
+echo "## Files >100M (top 50)"
+find / -xdev -type f -size +100M 2>/dev/null | head -50
+echo
+echo "## docker dangling volumes"
+docker volume ls -f dangling=true 2>/dev/null || echo "n/a"
+REMOTE_EOF
+)
+
+TS=$(date -u +%Y%m%dT%H%M%SZ)
+HEADER="# Disk report — vps-prod — ${TS}"
+
+OUTPUT="${HEADER}
+
+\`\`\`
+${REMOTE_REPORT}
+\`\`\`
+"
+
+echo "${OUTPUT}"
+
+if [[ ${SAVE_REPORT} -eq 1 ]]; then
+  mkdir -p "${REPORTS_DIR}"
+  REPORT_PATH="${REPORTS_DIR}/disk-report-${TS}.md"
+  printf '%s\n' "${OUTPUT}" > "${REPORT_PATH}"
+  echo
+  echo "Saved: ${REPORT_PATH}"
+fi

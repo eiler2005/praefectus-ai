@@ -1,0 +1,180 @@
+---
+# Безопасная чистка диска. Принципы:
+# - Все docker prune команды имеют --filter "until=Nh"
+# - Volumes никогда не удаляются автоматически
+# - Application data в /opt/<app>/{data,workspace} не трогается
+# - Каждый шаг идемпотентный, --check-friendly
+
+- name: "cleanup | safety check — disk not in critical state"
+  ansible.builtin.fail:
+    msg: |
+      Disk usage is {{ audit_disk_used_pct }}% (>= {{ disk_crit_pct }}% critical).
+      Stopping cleanup — manual audit required first.
+      Run: ./modules/disk-observatory/bin/disk-report
+      Inspect carefully before automatic cleanup.
+  when:
+    - audit_disk_used_pct is defined
+    - audit_disk_used_pct | int >= disk_crit_pct | int
+
+# ---------- APT ----------
+- name: "cleanup | apt-get clean"
+  ansible.builtin.command: apt-get clean
+  become: true
+  changed_when: true
+  when: cleanup_apt | bool
+  tags: [apt]
+
+- name: "cleanup | apt-get autoremove"
+  ansible.builtin.apt:
+    autoremove: true
+    purge: true
+  become: true
+  when: cleanup_apt | bool
+  tags: [apt]
+
+# ---------- JOURNAL ----------
+- name: "cleanup | journalctl vacuum by time ({{ journal_keep_time }})"
+  ansible.builtin.command: "journalctl --vacuum-time={{ journal_keep_time }}"
+  become: true
+  changed_when: true
+  when: cleanup_journal | bool
+  tags: [journal]
+
+- name: "cleanup | journalctl vacuum by size ({{ journal_max_size }})"
+  ansible.builtin.command: "journalctl --vacuum-size={{ journal_max_size }}"
+  become: true
+  changed_when: true
+  when: cleanup_journal | bool
+  tags: [journal]
+
+# ---------- DOCKER ----------
+- name: "cleanup | docker available?"
+  ansible.builtin.command: docker --version
+  register: docker_check
+  changed_when: false
+  failed_when: false
+  check_mode: false
+  tags: [docker]
+
+- name: "cleanup | docker block"
+  when:
+    - cleanup_docker | bool
+    - docker_check.rc == 0
+  tags: [docker]
+  block:
+    - name: "cleanup | docker system df (before)"
+      ansible.builtin.command: docker system df
+      register: docker_df_before
+      changed_when: false
+      check_mode: false
+
+    - name: "cleanup | docker container prune (until={{ docker_container_age }})"
+      ansible.builtin.command: "docker container prune -f --filter until={{ docker_container_age }}"
+      become: true
+      register: docker_container_prune
+      changed_when: "'Total reclaimed space' in docker_container_prune.stdout and '0B' not in docker_container_prune.stdout"
+
+    - name: "cleanup | docker image prune (until={{ docker_image_age }})"
+      ansible.builtin.command: "docker image prune -af --filter until={{ docker_image_age }}"
+      become: true
+      register: docker_image_prune
+      changed_when: "'Total reclaimed space' in docker_image_prune.stdout and '0B' not in docker_image_prune.stdout"
+
+    - name: "cleanup | docker builder prune (until={{ docker_builder_age }})"
+      ansible.builtin.command: "docker builder prune -af --filter until={{ docker_builder_age }}"
+      become: true
+      register: docker_builder_prune
+      changed_when: "'Total' in docker_builder_prune.stdout and '0B' not in docker_builder_prune.stdout"
+
+    - name: "cleanup | check for dangling volumes"
+      ansible.builtin.command: docker volume ls -f dangling=true -q
+      become: true
+      register: docker_dangling_volumes
+      changed_when: false
+      check_mode: false
+
+    - name: "cleanup | warn if dangling volumes exist (NEVER auto-prune)"
+      ansible.builtin.debug:
+        msg: |
+          ⚠️ Manual review required: {{ docker_dangling_volumes.stdout_lines | length }} dangling volume(s) detected.
+          Volumes are NEVER pruned automatically (they may contain state).
+
+          Inspect:
+            ssh {{ ansible_user }}@{{ ansible_host }} 'docker volume ls -f dangling=true'
+          For each:
+            ssh {{ ansible_user }}@{{ ansible_host }} 'docker volume inspect <name>'
+          When sure:
+            ssh {{ ansible_user }}@{{ ansible_host }} 'docker volume rm <name>'
+
+          Volumes:
+          {{ docker_dangling_volumes.stdout }}
+      when: docker_dangling_volumes.stdout_lines | length > 0
+
+    - name: "cleanup | docker system df (after)"
+      ansible.builtin.command: docker system df
+      register: docker_df_after
+      changed_when: false
+      check_mode: false
+
+    - name: "cleanup | docker prune summary"
+      ansible.builtin.debug:
+        msg:
+          - "=== DOCKER CLEANUP ==="
+          - "Container prune: {{ docker_container_prune.stdout_lines[-1] | default('n/a') }}"
+          - "Image prune:     {{ docker_image_prune.stdout_lines[-1] | default('n/a') }}"
+          - "Builder prune:   {{ docker_builder_prune.stdout_lines[-1] | default('n/a') }}"
+          - "Dangling volumes (manual): {{ docker_dangling_volumes.stdout_lines | length }}"
+
+# ---------- LOGROTATE ----------
+- name: "cleanup | check logrotate target dirs exist"
+  ansible.builtin.stat:
+    path: "{{ item.path }}"
+  register: logrotate_stat
+  loop: "{{ logrotate_targets | default([]) }}"
+  when: cleanup_logrotate | bool
+  tags: [logrotate]
+
+- name: "cleanup | filter to existing logrotate targets"
+  ansible.builtin.set_fact:
+    logrotate_active_targets: >-
+      {{ logrotate_stat.results
+         | selectattr('stat.exists', 'equalto', true)
+         | map(attribute='item')
+         | list }}
+  when: cleanup_logrotate | bool
+  tags: [logrotate]
+
+- name: "cleanup | install logrotate config /etc/logrotate.d/{{ logrotate_config_name }}"
+  ansible.builtin.copy:
+    dest: "/etc/logrotate.d/{{ logrotate_config_name }}"
+    mode: "0644"
+    owner: root
+    group: root
+    content: |
+      # Managed by vps_management. Do not edit manually.
+      {% for t in logrotate_active_targets | default([]) %}
+      {{ t.path }}/{{ t.pattern }} {
+          daily
+          rotate 14
+          compress
+          delaycompress
+          missingok
+          notifempty
+          sharedscripts
+      }
+      {% endfor %}
+  become: true
+  when:
+    - cleanup_logrotate | bool
+    - (logrotate_active_targets | default([])) | length > 0
+  tags: [logrotate]
+
+- name: "cleanup | remove logrotate config if no targets exist"
+  ansible.builtin.file:
+    path: "/etc/logrotate.d/{{ logrotate_config_name }}"
+    state: absent
+  become: true
+  when:
+    - cleanup_logrotate | bool
+    - (logrotate_active_targets | default([])) | length == 0
+  tags: [logrotate]

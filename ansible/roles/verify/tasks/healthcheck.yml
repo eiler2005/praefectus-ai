@@ -1,0 +1,67 @@
+---
+# Healthcheck для одного контейнера. Включается через include_tasks с loop_var=hc_item.
+# Поддерживает три типа: docker (нативный healthcheck), http://..., tcp:host:port
+
+- name: "healthcheck | docker inspect for {{ hc_item.name }}"
+  ansible.builtin.command: >
+    docker inspect --format={{ '{{.State.Health.Status}}' | quote }} {{ hc_item.name }}
+  register: hc_docker_status
+  changed_when: false
+  failed_when: false
+  check_mode: false
+  when: hc_item.healthcheck == 'docker'
+
+- name: "healthcheck | http for {{ hc_item.name }}"
+  ansible.builtin.uri:
+    url: "{{ hc_item.healthcheck }}"
+    method: GET
+    status_code: [200, 204]
+    timeout: 5
+  register: hc_http_status
+  failed_when: false
+  check_mode: false
+  when: hc_item.healthcheck.startswith('http')
+
+- name: "healthcheck | tcp for {{ hc_item.name }}"
+  ansible.builtin.wait_for:
+    host: "{{ hc_item.healthcheck.split(':')[1] }}"
+    port: "{{ hc_item.healthcheck.split(':')[2] }}"
+    timeout: 3
+    state: started
+  register: hc_tcp_status
+  failed_when: false
+  check_mode: false
+  when: hc_item.healthcheck.startswith('tcp:')
+
+- name: "healthcheck | record docker status"
+  ansible.builtin.set_fact:
+    verify_results: >-
+      {{ verify_results + [{
+        'check': 'health:' ~ hc_item.name,
+        'status': (
+          'ok' if hc_docker_status.stdout in ['healthy', 'none', '<no value>']
+          else 'fail'
+        ),
+        'detail': 'docker health=' ~ (hc_docker_status.stdout | default('?'))
+      }] }}
+  when: hc_item.healthcheck == 'docker'
+
+- name: "healthcheck | record http status"
+  ansible.builtin.set_fact:
+    verify_results: >-
+      {{ verify_results + [{
+        'check': 'health:' ~ hc_item.name,
+        'status': ('ok' if (hc_http_status.status | default(0)) in [200, 204] else 'fail'),
+        'detail': 'http=' ~ (hc_http_status.status | default('unreachable')) ~ ' url=' ~ hc_item.healthcheck
+      }] }}
+  when: hc_item.healthcheck.startswith('http')
+
+- name: "healthcheck | record tcp status"
+  ansible.builtin.set_fact:
+    verify_results: >-
+      {{ verify_results + [{
+        'check': 'health:' ~ hc_item.name,
+        'status': ('ok' if not (hc_tcp_status.failed | default(true)) else 'fail'),
+        'detail': 'tcp=' ~ hc_item.healthcheck.split(':', 1)[1] ~ ' ' ~ ('reachable' if not (hc_tcp_status.failed | default(true)) else 'unreachable')
+      }] }}
+  when: hc_item.healthcheck.startswith('tcp:')

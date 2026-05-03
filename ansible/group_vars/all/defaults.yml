@@ -1,0 +1,4 @@
+---
+project_name: vps_management
+deploy_user: deploy
+report_dir_local: "{{ playbook_dir }}/../../reports"

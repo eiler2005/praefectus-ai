@@ -1,0 +1,12 @@
+---
+# Defaults для disk_audit. Перекрываются через group_vars/vps.yml или vault.
+audit_paths:
+  - /var/log
+  - /var/lib/docker
+  - /var/cache
+  - /opt
+  - /home
+audit_top_dirs: 20
+audit_top_files: 50
+audit_min_file_size_mb: 100
+audit_save_report: true

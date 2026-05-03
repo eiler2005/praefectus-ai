@@ -1,0 +1,123 @@
+---
+# Read-only health gate. Никаких изменений.
+# Использует raw module (работает с pipelining на этом VPS).
+# Все проверки: disk, mem, load, docker daemon, containers, ufw, app dirs.
+
+- name: "99 | Verify — read-only health checks"
+  hosts: vps
+  gather_facts: false
+
+  tasks:
+    - name: "verify | 1) ssh + python reachable"
+      ansible.builtin.raw: "python3 -c 'print(\"pong\")'"
+      register: vfy_ssh
+      changed_when: false
+      check_mode: false
+
+    - name: "verify | 2) disk usage /"
+      ansible.builtin.raw: "df -BM --output=pcent / | tail -1 | tr -d ' %M'"
+      register: vfy_disk_pct_raw
+      changed_when: false
+      check_mode: false
+
+    - name: "verify | set disk fact"
+      ansible.builtin.set_fact:
+        vfy_disk_pct: "{{ vfy_disk_pct_raw.stdout | trim | int }}"
+
+    - name: "verify | disk warn?"
+      ansible.builtin.debug:
+        msg: "WARN disk {{ vfy_disk_pct }}% >= {{ vault_disk_warn_pct | default(80) }}%"
+      when: vfy_disk_pct | int >= (vault_disk_warn_pct | default(80)) | int
+
+    - name: "verify | 3) memory available"
+      ansible.builtin.raw: "free -m | awk '/^Mem:/ {print $7}'"
+      register: vfy_mem_raw
+      changed_when: false
+      check_mode: false
+
+    - name: "verify | set mem fact"
+      ansible.builtin.set_fact:
+        vfy_mem_mb: "{{ vfy_mem_raw.stdout | trim | int }}"
+
+    - name: "verify | mem warn?"
+      ansible.builtin.debug:
+        msg: "WARN memory {{ vfy_mem_mb }}M available < {{ vault_mem_warn_mb | default(500) }}M"
+      when: vfy_mem_mb | int < (vault_mem_warn_mb | default(500)) | int
+
+    - name: "verify | 4) load avg 5min"
+      ansible.builtin.raw: "awk '{print $2}' /proc/loadavg"
+      register: vfy_load_raw
+      changed_when: false
+      check_mode: false
+
+    - name: "verify | 5) docker daemon"
+      ansible.builtin.raw: "systemctl is-active docker || echo inactive"
+      register: vfy_docker_raw
+      changed_when: false
+      check_mode: false
+
+    - name: "verify | 6) running containers"
+      ansible.builtin.raw: !unsafe "docker ps --format '{{.Names}}'"
+      register: vfy_containers_raw
+      changed_when: false
+      check_mode: false
+      failed_when: false
+
+    - name: "verify | 7) ufw status"
+      ansible.builtin.raw: "sudo ufw status | head -1"
+      register: vfy_ufw_raw
+      changed_when: false
+      check_mode: false
+      failed_when: false
+
+    - name: "verify | 8) expected app dirs"
+      ansible.builtin.raw: |
+        for d in /opt/maxtg-bridge /opt/openclaw /opt/lightrag; do
+          [ -d "$d" ] && echo "OK $d" || echo "MISSING $d"
+        done
+      register: vfy_dirs_raw
+      changed_when: false
+      check_mode: false
+
+    - name: "verify | 9) journal disk usage"
+      ansible.builtin.raw: "journalctl --disk-usage 2>/dev/null | head -1"
+      register: vfy_journal_raw
+      changed_when: false
+      check_mode: false
+      failed_when: false
+
+    - name: "verify | display full summary"
+      ansible.builtin.debug:
+        msg:
+          - "============================================================"
+          - "VERIFY SUMMARY — vps-prod"
+          - "============================================================"
+          - "SSH:         OK"
+          - "Disk /:      {{ vfy_disk_pct }}% | WARN >= {{ vault_disk_warn_pct | default(80) }}% CRIT >= {{ vault_disk_crit_pct | default(90) }}%"
+          - "Memory:      {{ vfy_mem_mb }}M avail | WARN < {{ vault_mem_warn_mb | default(500) }}M"
+          - "Load 5min:   {{ vfy_load_raw.stdout | trim }}"
+          - "Docker:      {{ vfy_docker_raw.stdout | trim }}"
+          - "UFW:         {{ vfy_ufw_raw.stdout | trim | default('n/a') }}"
+          - "Journal:     {{ vfy_journal_raw.stdout | trim | default('n/a') }}"
+          - "------------------------------------------------------------"
+          - "Running containers:"
+          - "{{ vfy_containers_raw.stdout_lines | default([]) }}"
+          - "------------------------------------------------------------"
+          - "App dirs:"
+          - "{{ vfy_dirs_raw.stdout_lines | default([]) }}"
+          - "============================================================"
+
+    - name: "verify | fail if disk critical"
+      ansible.builtin.fail:
+        msg: "CRITICAL: disk {{ vfy_disk_pct }}% >= {{ vault_disk_crit_pct | default(90) }}%"
+      when: vfy_disk_pct | int >= (vault_disk_crit_pct | default(90)) | int
+
+    - name: "verify | fail if memory critical"
+      ansible.builtin.fail:
+        msg: "CRITICAL: memory {{ vfy_mem_mb }}M available < {{ vault_mem_crit_mb | default(200) }}M"
+      when: vfy_mem_mb | int < (vault_mem_crit_mb | default(200)) | int
+
+    - name: "verify | fail if docker not active"
+      ansible.builtin.fail:
+        msg: "CRITICAL: docker daemon is not active"
+      when: "'active' not in (vfy_docker_raw.stdout | default(''))"

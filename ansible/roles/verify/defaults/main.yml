@@ -1,0 +1,9 @@
+---
+verify_disk_warn_pct: "{{ vault_disk_warn_pct | default(disk_warn_pct_default) }}"
+verify_disk_crit_pct: "{{ vault_disk_crit_pct | default(disk_crit_pct_default) }}"
+verify_mem_warn_mb: "{{ vault_mem_warn_mb | default(mem_warn_mb_default) }}"
+verify_mem_crit_mb: "{{ vault_mem_crit_mb | default(mem_crit_mb_default) }}"
+verify_loadavg_warn: "{{ loadavg_warn }}"
+verify_loadavg_crit: "{{ loadavg_crit }}"
+verify_save_report: true
+verify_check_containers: true

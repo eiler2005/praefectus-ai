@@ -1,0 +1,199 @@
+---
+# Устанавливает еженедельную автоматическую чистку на VPS.
+# Создаёт /usr/local/bin/vps-periodic-cleanup.sh + systemd timer (weekly, воскресенье 03:00 UTC).
+#
+# Безопасные операции (те же фильтры что и в 10-disk-cleanup.yml):
+#   - apt clean
+#   - journalctl vacuum (14d / 500M)
+#   - docker container/image/builder prune --filter until=Nh
+#   - volumes НЕ трогаем
+#
+# Workflow:
+#   ansible-playbook playbooks/11-periodic-cleanup-setup.yml --check   (dry-run)
+#   ansible-playbook playbooks/11-periodic-cleanup-setup.yml           (apply)
+#
+# После установки проверить:
+#   ssh deploy@<vps> systemctl status vps-cleanup.timer
+#   ssh deploy@<vps> systemctl list-timers vps-cleanup.timer
+
+- name: "11 | Periodic cleanup setup — install weekly cleanup timer"
+  hosts: vps
+  gather_facts: false
+
+  vars:
+    docker_container_age: "{{ vault_docker_container_age | default('72h') }}"
+    docker_image_age:     "{{ vault_docker_image_age     | default('168h') }}"
+    docker_builder_age:   "{{ vault_docker_builder_age   | default('168h') }}"
+    journal_keep_time:    "{{ vault_journal_keep_time    | default('14d') }}"
+    journal_max_size:     "{{ vault_journal_max_size     | default('500M') }}"
+    cleanup_script_path: /usr/local/bin/vps-periodic-cleanup.sh
+    cleanup_log_path:    /var/log/vps-periodic-cleanup.log
+
+  tasks:
+    # ---- SCRIPT ----
+    - name: "11 | script | install cleanup script"
+      ansible.builtin.raw: |
+        sudo tee {{ cleanup_script_path }} > /dev/null << 'SCRIPT_EOF'
+        #!/usr/bin/env bash
+        # vps-periodic-cleanup.sh — weekly disk maintenance (managed by vps_management ansible)
+        # DO NOT EDIT MANUALLY — re-run 11-periodic-cleanup-setup.yml to update
+        set -euo pipefail
+        LOG="{{ cleanup_log_path }}"
+        TS=$(date '+%Y-%m-%d %H:%M:%S')
+        log() { echo "[$TS] $*" | tee -a "$LOG"; }
+
+        log "=== VPS periodic cleanup START ==="
+
+        # APT
+        apt-get clean -y 2>&1 | tail -1 | xargs -I{} log "apt clean: {}"
+
+        # Journal
+        journalctl --vacuum-time={{ journal_keep_time }} 2>&1 | tail -1 | xargs -I{} log "journal vacuum-time: {}"
+        journalctl --vacuum-size={{ journal_max_size }}  2>&1 | tail -1 | xargs -I{} log "journal vacuum-size: {}"
+
+        # Docker
+        docker container prune -f --filter "until={{ docker_container_age }}" 2>&1 | tail -1 | xargs -I{} log "container prune: {}"
+        docker image     prune -af --filter "until={{ docker_image_age }}"     2>&1 | tail -1 | xargs -I{} log "image prune: {}"
+        docker builder   prune -af --filter "until={{ docker_builder_age }}"   2>&1 | tail -1 | xargs -I{} log "builder prune: {}"
+
+        # Disk after
+        DISK_PCT=$(df --output=pcent / | tail -1 | tr -d ' %')
+        log "disk after: ${DISK_PCT}%"
+
+        # Dangling volumes — warn only, never auto-prune
+        DANGLING=$(docker volume ls -f dangling=true -q | wc -l)
+        if [ "$DANGLING" -gt 0 ]; then
+          log "WARN: $DANGLING dangling volume(s) — manual review required"
+        fi
+
+        log "=== VPS periodic cleanup END ==="
+        SCRIPT_EOF
+        sudo chmod 755 {{ cleanup_script_path }}
+        echo CHANGED
+      register: script_install
+      changed_when: "'CHANGED' in script_install.stdout"
+      tags: [script]
+
+    - name: "11 | script | verify installed"
+      ansible.builtin.raw: "test -x {{ cleanup_script_path }} && echo OK"
+      register: script_verify
+      changed_when: false
+      failed_when: "'OK' not in script_verify.stdout"
+      tags: [script]
+
+    # ---- SYSTEMD SERVICE ----
+    - name: "11 | systemd | install service unit"
+      ansible.builtin.raw: |
+        sudo tee /etc/systemd/system/vps-cleanup.service > /dev/null << 'SERVICE_EOF'
+        [Unit]
+        Description=VPS Periodic Disk Cleanup
+        After=docker.service
+        Requires=docker.service
+
+        [Service]
+        Type=oneshot
+        ExecStart={{ cleanup_script_path }}
+        StandardOutput=journal
+        StandardError=journal
+        SyslogIdentifier=vps-cleanup
+        # Cleanup runs as root (needs apt, journalctl --vacuum, docker)
+        User=root
+        SERVICE_EOF
+        echo CHANGED
+      register: service_install
+      changed_when: "'CHANGED' in service_install.stdout"
+      notify: systemd reload
+      tags: [systemd]
+
+    # ---- SYSTEMD TIMER ----
+    - name: "11 | systemd | install timer unit (weekly, Sun 03:00 UTC)"
+      ansible.builtin.raw: |
+        sudo tee /etc/systemd/system/vps-cleanup.timer > /dev/null << 'TIMER_EOF'
+        [Unit]
+        Description=VPS Periodic Disk Cleanup — weekly timer
+        Requires=vps-cleanup.service
+
+        [Timer]
+        OnCalendar=Sun *-*-* 03:00:00 UTC
+        Persistent=true
+        RandomizedDelaySec=300
+
+        [Install]
+        WantedBy=timers.target
+        TIMER_EOF
+        echo CHANGED
+      register: timer_install
+      changed_when: "'CHANGED' in timer_install.stdout"
+      notify: systemd reload
+      tags: [systemd]
+
+    # ---- ENABLE / START TIMER ----
+    - name: "11 | systemd | daemon-reload + enable + start timer"
+      ansible.builtin.raw: |
+        sudo systemctl daemon-reload
+        sudo systemctl enable vps-cleanup.timer
+        sudo systemctl start vps-cleanup.timer
+        echo CHANGED
+      register: timer_enable
+      changed_when: "'CHANGED' in timer_enable.stdout"
+      tags: [systemd]
+
+    # ---- LOGROTATE FOR CLEANUP LOG ----
+    - name: "11 | logrotate | cleanup log rotation"
+      ansible.builtin.raw: |
+        sudo tee /etc/logrotate.d/vps-periodic-cleanup > /dev/null << 'LOGROTATE_EOF'
+        {{ cleanup_log_path }} {
+            weekly
+            rotate 8
+            compress
+            delaycompress
+            missingok
+            notifempty
+            copytruncate
+        }
+        LOGROTATE_EOF
+        echo CHANGED
+      register: logrotate_cleanup
+      changed_when: "'CHANGED' in logrotate_cleanup.stdout"
+      tags: [logrotate]
+
+    # ---- VERIFY ----
+    - name: "11 | verify | timer status"
+      ansible.builtin.raw: "systemctl is-active vps-cleanup.timer || echo inactive"
+      register: timer_status
+      changed_when: false
+      check_mode: false
+
+    - name: "11 | verify | next trigger"
+      ansible.builtin.raw: "systemctl list-timers vps-cleanup.timer --no-pager 2>/dev/null | tail -2"
+      register: timer_next
+      changed_when: false
+      check_mode: false
+
+    - name: "11 | summary"
+      ansible.builtin.debug:
+        msg:
+          - "========================================="
+          - "PERIODIC CLEANUP SETUP SUMMARY"
+          - "========================================="
+          - "Script:       {{ cleanup_script_path }}"
+          - "Log:          {{ cleanup_log_path }}"
+          - "Timer:        vps-cleanup.timer"
+          - "Schedule:     Sun 03:00 UTC (weekly)"
+          - "Timer status: {{ timer_status.stdout | trim }}"
+          - ""
+          - "Next trigger:"
+          - "{{ timer_next.stdout_lines | default([]) }}"
+          - ""
+          - "Manual test (dry-run via ansible):"
+          - "  ansible-playbook playbooks/10-disk-cleanup.yml --check"
+          - "Manual test (run script directly):"
+          - "  ssh deploy@<vps> sudo {{ cleanup_script_path }}"
+          - "Watch logs:"
+          - "  ssh deploy@<vps> journalctl -u vps-cleanup -f"
+          - "========================================="
+
+  handlers:
+    - name: systemd reload
+      ansible.builtin.raw: "sudo systemctl daemon-reload"
+      listen: "systemd reload"

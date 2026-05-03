@@ -1,0 +1,20 @@
+---
+cleanup_apt: true
+cleanup_journal: true
+cleanup_docker: true
+cleanup_logrotate: true
+
+# Time-based filters. Без них prune опасен.
+docker_container_age: "{{ vault_docker_container_age | default('72h') }}"
+docker_image_age: "{{ vault_docker_image_age | default('168h') }}"
+docker_builder_age: "{{ vault_docker_builder_age | default('168h') }}"
+
+journal_keep_time: "{{ vault_journal_keep_time | default('14d') }}"
+journal_max_size: "{{ vault_journal_max_size | default('500M') }}"
+
+# Логротейт целевые директории — из group_vars/vps.yml
+# logrotate_config_name, logrotate_targets
+
+# Безопасная остановка: если диск критически пустой (>=crit_pct) — не запускаем cleanup,
+# а требуем ручного аудита (могут быть проблемы с inotify, OOM, и т.п.)
+disk_crit_pct: "{{ vault_disk_crit_pct | default(95) }}"
