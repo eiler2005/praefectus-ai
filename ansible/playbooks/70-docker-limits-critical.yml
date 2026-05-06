@@ -1,0 +1,199 @@
+---
+# Устанавливает memory limits для критичных сервисов OpenClaw stack.
+#
+# Применяет лимиты ДВУМЯ способами:
+#   1. docker-compose.override.local.yml — персистентный (активируется при следующем compose up)
+#   2. docker update — немедленно, без перезапуска сервисов
+#
+# Не трогаем (чужие зоны):
+#   - xray, xray-xhttp, ghostroute-console (router_configuration)
+#   - deploy-bridge-1 (maxtg_bridge, лимит уже в prod compose)
+#
+# ВНИМАНИЕ при ручном перезапуске openclaw:
+#   Указывать сервисы явно — в docker-compose.override.yml есть telethon-digest,
+#   который НЕ должен запускаться отсюда (живёт в /opt/telethon-digest/).
+#
+# Restart commands (выполнять вручную после проверки):
+#   cd /opt/openclaw && sudo docker compose \
+#     -f docker-compose.yml -f docker-compose.override.yml -f docker-compose.override.local.yml \
+#     up -d openclaw-gateway omniroute
+#   cd /opt/lightrag && sudo docker compose \
+#     -f docker-compose.yml -f docker-compose.override.yml -f docker-compose.override.local.yml \
+#     up -d
+#   cd /opt/integration-bus && sudo docker compose \
+#     -f docker-compose.yml -f docker-compose.override.local.yml \
+#     up -d
+
+- name: "70 | Docker memory limits — критичные сервисы (Этап 3)"
+  hosts: vps
+  gather_facts: false
+
+  vars:
+    mem_openclaw_gateway: "{{ vault_mem_openclaw_gateway | default('1024m') }}"
+    mem_omniroute:        "{{ vault_mem_omniroute        | default('512m') }}"
+    mem_lightrag:         "{{ vault_mem_lightrag         | default('192m') }}"
+    mem_redis:            "{{ vault_mem_redis            | default('256m') }}"
+
+  tasks:
+    # ---- AUDIT ----
+    - name: "70 | audit | текущее потребление RAM"
+      ansible.builtin.raw: !unsafe |
+        docker stats --no-stream --format \
+          "table {{.Name}}\t{{.MemUsage}}\t{{.MemPerc}}" 2>/dev/null
+      register: docker_stats
+      changed_when: false
+      check_mode: false
+
+    - name: "70 | audit | display stats"
+      ansible.builtin.debug:
+        msg: "{{ docker_stats.stdout_lines }}"
+
+    # ---- OVERRIDE FILES ----
+
+    # openclaw project: gateway + omniroute (один файл для обоих)
+    - name: "70 | limits | openclaw-gateway ({{ mem_openclaw_gateway }}) + omniroute ({{ mem_omniroute }})"
+      ansible.builtin.raw: |
+        sudo tee /opt/openclaw/docker-compose.override.local.yml > /dev/null << 'EOF'
+        # Managed by vps_management — host-level memory constraints only.
+        # Do NOT edit service definitions here.
+        # Restart (ТОЛЬКО gateway + omniroute, не telethon-digest):
+        #   cd /opt/openclaw && sudo docker compose \
+        #     -f docker-compose.yml -f docker-compose.override.yml -f docker-compose.override.local.yml \
+        #     up -d openclaw-gateway omniroute
+        services:
+          openclaw-gateway:
+            mem_limit: {{ mem_openclaw_gateway }}
+            memswap_limit: {{ mem_openclaw_gateway }}
+          omniroute:
+            mem_limit: {{ mem_omniroute }}
+            memswap_limit: {{ mem_omniroute }}
+        EOF
+        echo CHANGED
+      register: r_openclaw
+      changed_when: "'CHANGED' in r_openclaw.stdout"
+
+    # lightrag project
+    - name: "70 | limits | lightrag ({{ mem_lightrag }})"
+      ansible.builtin.raw: |
+        sudo tee /opt/lightrag/docker-compose.override.local.yml > /dev/null << 'EOF'
+        # Managed by vps_management — host-level memory constraints only.
+        # Restart:
+        #   cd /opt/lightrag && sudo docker compose \
+        #     -f docker-compose.yml -f docker-compose.override.yml -f docker-compose.override.local.yml \
+        #     up -d
+        services:
+          lightrag:
+            mem_limit: {{ mem_lightrag }}
+            memswap_limit: {{ mem_lightrag }}
+        EOF
+        echo CHANGED
+      register: r_lightrag
+      changed_when: "'CHANGED' in r_lightrag.stdout"
+
+    # integration-bus project: redis
+    - name: "70 | limits | redis ({{ mem_redis }})"
+      ansible.builtin.raw: |
+        sudo tee /opt/integration-bus/docker-compose.override.local.yml > /dev/null << 'EOF'
+        # Managed by vps_management — host-level memory constraints only.
+        # Restart:
+        #   cd /opt/integration-bus && sudo docker compose \
+        #     -f docker-compose.yml -f docker-compose.override.local.yml \
+        #     up -d
+        services:
+          redis:
+            mem_limit: {{ mem_redis }}
+            memswap_limit: {{ mem_redis }}
+        EOF
+        echo CHANGED
+      register: r_redis
+      changed_when: "'CHANGED' in r_redis.stdout"
+
+    # ---- APPLY IMMEDIATELY VIA docker update (no restart) ----
+    - name: "70 | apply | docker update — лимиты без перезапуска"
+      ansible.builtin.raw: |
+        sudo docker update \
+          --memory={{ mem_openclaw_gateway }} \
+          --memory-swap={{ mem_openclaw_gateway }} \
+          openclaw-openclaw-gateway-1 && echo "gateway: ok" || echo "gateway: FAILED"
+        sudo docker update \
+          --memory={{ mem_omniroute }} \
+          --memory-swap={{ mem_omniroute }} \
+          omniroute && echo "omniroute: ok" || echo "omniroute: FAILED"
+        sudo docker update \
+          --memory={{ mem_lightrag }} \
+          --memory-swap={{ mem_lightrag }} \
+          lightrag-lightrag-1 && echo "lightrag: ok" || echo "lightrag: FAILED"
+        sudo docker update \
+          --memory={{ mem_redis }} \
+          --memory-swap={{ mem_redis }} \
+          integration-bus-redis && echo "redis: ok" || echo "redis: FAILED"
+      register: r_update
+      changed_when: "': ok' in r_update.stdout"
+
+    - name: "70 | apply | display update result"
+      ansible.builtin.debug:
+        msg: "{{ r_update.stdout_lines | default(['(skipped in check mode)']) }}"
+
+    # ---- VERIFY ----
+    - name: "70 | verify | текущие лимиты (docker inspect)"
+      ansible.builtin.raw: |
+        docker inspect openclaw-openclaw-gateway-1 omniroute lightrag-lightrag-1 integration-bus-redis 2>/dev/null | python3 -c "
+        import json,sys
+        data = json.load(sys.stdin)
+        for c in data:
+            name = c['Name'].lstrip('/')
+            mem  = c['HostConfig']['Memory']
+            swap = c['HostConfig']['MemorySwap']
+            mb   = mem // 1024 // 1024
+            print(f'{name}: {mb}MB limit, swap={swap//1024//1024}MB')
+        "
+      register: r_verify
+      changed_when: false
+
+    - name: "70 | verify | display"
+      ansible.builtin.debug:
+        msg: "{{ r_verify.stdout_lines | default(['(skipped in check mode)']) }}"
+
+    - name: "70 | verify | свободная RAM после применения лимитов"
+      ansible.builtin.raw: |
+        free -m | awk 'NR==2{printf "RAM: used=%sMB avail=%sMB\n",$3,$7}'
+        free -m | awk 'NR==3{printf "Swap: used=%sMB free=%sMB\n",$3,$4}'
+      register: r_free
+      changed_when: false
+
+    - name: "70 | verify | display free"
+      ansible.builtin.debug:
+        msg: "{{ r_free.stdout_lines | default(['(skipped in check mode)']) }}"
+
+    # ---- SUMMARY ----
+    - name: "70 | summary"
+      ansible.builtin.debug:
+        msg:
+          - "================================================="
+          - "DOCKER LIMITS CRITICAL SUMMARY (Этап 3)"
+          - "================================================="
+          - "openclaw-gateway:   {{ mem_openclaw_gateway }}  (override: {{ r_openclaw.changed }}, update: applied)"
+          - "omniroute:          {{ mem_omniroute }}   (override: {{ r_openclaw.changed }}, update: applied)"
+          - "lightrag:           {{ mem_lightrag }}   (override: {{ r_lightrag.changed }}, update: applied)"
+          - "redis:              {{ mem_redis }}   (override: {{ r_redis.changed }}, update: applied)"
+          - "================================================="
+          - "Лимиты применены НЕМЕДЛЕННО через docker update (без перезапуска)."
+          - "Override-файлы созданы для персистентности при следующем compose up."
+          - "================================================="
+          - "НЕ затронуты (чужие зоны / другой этап):"
+          - "  xray, xray-xhttp, ghostroute-console (router_configuration)"
+          - "  deploy-bridge-1 (maxtg_bridge, лимит в prod compose)"
+          - "================================================="
+          - "Память бюджет (3819MB RAM):"
+          - "  openclaw-gateway:   {{ mem_openclaw_gateway }}"
+          - "  omniroute:          {{ mem_omniroute }}"
+          - "  lightrag:           {{ mem_lightrag }}"
+          - "  redis:              {{ mem_redis }}"
+          - "  Этап 2 (5 сервисов): 1664MB"
+          - "  deploy-bridge-1:     256MB"
+          - "  router zone (est):   ~360MB (без лимита)"
+          - "  OS + kernel (est):   ~350MB"
+          - "================================================="
+          - "При выходе одного сервиса за лимит — остальные защищены."
+          - "Проверить: ansible-playbook playbooks/99-verify.yml"
+          - "================================================="

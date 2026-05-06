@@ -1,0 +1,73 @@
+#!/usr/bin/env bash
+# run-check — запускает vps-monitor.py на VPS вручную с Mac.
+# Показывает результат в реальном времени.
+#
+# Usage:
+#   ./modules/monitoring/bin/run-check               # health check
+#   ./modules/monitoring/bin/run-check --test-alert  # тест Telegram
+#   ./modules/monitoring/bin/run-check --log         # показать последние 50 строк лога
+#   ./modules/monitoring/bin/run-check --status      # статус systemd timer
+
+set -euo pipefail
+
+REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../../.." && pwd)"
+VAULT_FILE="${REPO_ROOT}/ansible/group_vars/all/vault.yml"
+
+# Parse args
+ACTION="check"
+for arg in "$@"; do
+  case "${arg}" in
+    --test-alert) ACTION="test-alert" ;;
+    --log)        ACTION="log" ;;
+    --status)     ACTION="status" ;;
+    --help|-h)
+      echo "Usage: run-check [--test-alert | --log | --status]"
+      exit 0 ;;
+  esac
+done
+
+# Read SSH credentials from vault
+if [[ ! -f "${VAULT_FILE}" ]]; then
+  echo "ERROR: vault not found: ${VAULT_FILE}" >&2
+  exit 2
+fi
+
+VAULT_CONTENT=$(ansible-vault view "${VAULT_FILE}")
+VPS_HOST=$(echo "${VAULT_CONTENT}" | awk -F'"' '/^vault_vps_ssh_host:/ {print $2; exit}')
+VPS_USER=$(echo "${VAULT_CONTENT}" | awk -F'"' '/^vault_vps_ssh_user:/ {print $2; exit}')
+VPS_PORT=$(echo "${VAULT_CONTENT}" | awk '/^vault_vps_ssh_port:/ {print $2; exit}')
+VPS_PORT="${VPS_PORT:-22}"
+
+if [[ -z "${VPS_HOST}" || -z "${VPS_USER}" ]]; then
+  echo "ERROR: VPS host/user not set in vault" >&2
+  exit 2
+fi
+
+SSH_OPTS=(-p "${VPS_PORT}" -o ConnectTimeout=10 -o ServerAliveInterval=30)
+
+case "${ACTION}" in
+  check)
+    echo "Running health check on ${VPS_USER}@${VPS_HOST}..." >&2
+    echo ""
+    ssh "${SSH_OPTS[@]}" "${VPS_USER}@${VPS_HOST}" \
+      "sudo python3 /usr/local/bin/vps-monitor.py --once"
+    ;;
+  test-alert)
+    echo "Sending test Telegram alert via ${VPS_USER}@${VPS_HOST}..." >&2
+    echo ""
+    ssh "${SSH_OPTS[@]}" "${VPS_USER}@${VPS_HOST}" \
+      "sudo python3 /usr/local/bin/vps-monitor.py --test-alert"
+    ;;
+  log)
+    echo "Last 50 lines of /var/log/vps-monitor.log:" >&2
+    echo ""
+    ssh "${SSH_OPTS[@]}" "${VPS_USER}@${VPS_HOST}" \
+      "sudo tail -50 /var/log/vps-monitor.log 2>/dev/null || echo '(log not found — monitoring not installed?)'"
+    ;;
+  status)
+    echo "Monitoring timer status on ${VPS_USER}@${VPS_HOST}:" >&2
+    echo ""
+    ssh "${SSH_OPTS[@]}" "${VPS_USER}@${VPS_HOST}" \
+      "systemctl status vps-monitor.timer 2>/dev/null || echo 'timer not found — run: ansible-playbook playbooks/20-monitoring.yml'"
+    ;;
+esac

@@ -1,0 +1,104 @@
+---
+# Installs vps-monitor: Python health poller + systemd timer (every 5min).
+# Manual run (after install): ssh deploy@<vps> 'sudo python3 /usr/local/bin/vps-monitor.py --once'
+# Test Telegram: ssh deploy@<vps> 'sudo python3 /usr/local/bin/vps-monitor.py --test-alert'
+
+# ---- State dir ----
+- name: "monitoring | create /opt/vps-monitor"
+  ansible.builtin.raw: "sudo mkdir -p /opt/vps-monitor && sudo chmod 700 /opt/vps-monitor"
+  changed_when: false
+
+# ---- Poller script ----
+# Note: template is rendered locally then uploaded via copy to avoid become: true
+# variable scoping issues that cause Jinja2 vault vars to render as empty.
+- name: "monitoring | render vps-monitor.py locally"
+  ansible.builtin.template:
+    src: vps-monitor.py.j2
+    dest: "{{ playbook_dir }}/../../reports/.vps-monitor-rendered.py"
+    mode: "0600"
+  delegate_to: localhost
+  become: false
+
+- name: "monitoring | deploy vps-monitor.py"
+  ansible.builtin.copy:
+    src: "{{ playbook_dir }}/../../reports/.vps-monitor-rendered.py"
+    dest: /usr/local/bin/vps-monitor.py
+    owner: root
+    group: root
+    mode: "0700"
+  become: true
+  register: r_script
+
+- name: "monitoring | cleanup rendered local copy"
+  ansible.builtin.file:
+    path: "{{ playbook_dir }}/../../reports/.vps-monitor-rendered.py"
+    state: absent
+  delegate_to: localhost
+  become: false
+
+# ---- Systemd units ----
+- name: "monitoring | deploy vps-monitor.service"
+  ansible.builtin.template:
+    src: vps-monitor.service.j2
+    dest: /etc/systemd/system/vps-monitor.service
+    owner: root
+    group: root
+    mode: "0644"
+  become: true
+  register: r_service
+
+- name: "monitoring | deploy vps-monitor.timer"
+  ansible.builtin.template:
+    src: vps-monitor.timer.j2
+    dest: /etc/systemd/system/vps-monitor.timer
+    owner: root
+    group: root
+    mode: "0644"
+  become: true
+  register: r_timer
+
+- name: "monitoring | reload systemd if units changed"
+  ansible.builtin.raw: "sudo systemctl daemon-reload"
+  when: r_service.changed or r_timer.changed
+  changed_when: true
+
+- name: "monitoring | enable + start timer"
+  ansible.builtin.raw: "sudo systemctl enable --now vps-monitor.timer"
+  register: r_enable
+  changed_when: "'Created symlink' in (r_enable.stdout | default(''))"
+
+# ---- Logrotate ----
+- name: "monitoring | logrotate for /var/log/vps-monitor.log"
+  ansible.builtin.raw: |
+    sudo tee /etc/logrotate.d/vps-monitor > /dev/null << 'EOF'
+    /var/log/vps-monitor.log {
+        weekly
+        rotate 8
+        compress
+        delaycompress
+        missingok
+        notifempty
+    }
+    EOF
+    echo CHANGED
+  register: r_logrotate
+  changed_when: "'CHANGED' in r_logrotate.stdout"
+
+# ---- Verify ----
+- name: "monitoring | verify timer is active"
+  ansible.builtin.raw: "systemctl is-active vps-monitor.timer || echo INACTIVE"
+  register: r_verify
+  changed_when: false
+
+- name: "monitoring | display status"
+  ansible.builtin.debug:
+    msg:
+      - "vps-monitor.timer: {{ r_verify.stdout | trim }}"
+      - "Script: /usr/local/bin/vps-monitor.py"
+      - "State:  /opt/vps-monitor/state.json"
+      - "Log:    /var/log/vps-monitor.log"
+      - ""
+      - "Manual check:   ssh {{ ansible_user }}@{{ ansible_host }} 'sudo python3 /usr/local/bin/vps-monitor.py --once'"
+      - "Test Telegram:  ssh {{ ansible_user }}@{{ ansible_host }} 'sudo python3 /usr/local/bin/vps-monitor.py --test-alert'"
+      - "View log:       ssh {{ ansible_user }}@{{ ansible_host }} 'sudo tail -50 /var/log/vps-monitor.log'"
+      - "Timer status:   ssh {{ ansible_user }}@{{ ansible_host }} 'systemctl status vps-monitor.timer'"

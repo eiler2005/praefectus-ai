@@ -1,0 +1,10 @@
+[Unit]
+Description=VPS health monitor (single check run)
+After=docker.service network-online.target
+
+[Service]
+Type=oneshot
+ExecStart=/usr/bin/python3 /usr/local/bin/vps-monitor.py --once
+StandardOutput=journal
+StandardError=journal
+User=root

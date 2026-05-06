@@ -1,0 +1,78 @@
+---
+# Installs VPS health monitoring: Python poller + systemd timer (every 5 min).
+#
+# Requires in vault:
+#   vault_tg_infra_bot_token: "bot_token"
+#   vault_tg_infra_chat_id:   "-1001234567890"
+#   vault_tg_infra_topic_id:  "42"   # опц. — thread ID в группе
+#
+# Workflow:
+#   ansible-playbook playbooks/20-monitoring.yml --check     (dry-run)
+#   ansible-playbook playbooks/20-monitoring.yml             (install)
+#
+# После установки — ручная проверка:
+#   ssh deploy@<vps> 'sudo python3 /usr/local/bin/vps-monitor.py --once'
+#
+# Тест Telegram:
+#   ssh deploy@<vps> 'sudo python3 /usr/local/bin/vps-monitor.py --test-alert'
+#
+# Mac-side shortcut:
+#   ./modules/monitoring/bin/run-check
+#   ./modules/monitoring/bin/run-check --test-alert
+#
+# Отключить timer:
+#   ssh deploy@<vps> 'sudo systemctl disable --now vps-monitor.timer'
+
+- name: "20 | VPS monitoring — install poller + timer"
+  hosts: vps
+  gather_facts: false
+
+  tasks:
+    # --- Validation ---
+    - name: "20 | validate | Telegram tokens configured"
+      ansible.builtin.fail:
+        msg: |
+          vault_tg_infra_bot_token and/or vault_tg_infra_chat_id not set.
+          Add to ansible/secrets/vault.yml (see vault.yml.example).
+          Without Telegram the monitor installs and runs, but sends no alerts.
+      when:
+        - vault_tg_infra_bot_token is not defined or vault_tg_infra_bot_token | length == 0
+        - vault_tg_infra_chat_id is not defined or vault_tg_infra_chat_id | length == 0
+      ignore_errors: true  # warn, don't abort — monitoring works without TG
+
+    - name: "20 | role | monitoring"
+      ansible.builtin.include_role:
+        name: monitoring
+
+    # --- Tags: check (manual one-off run) ---
+    - name: "20 | check | run vps-monitor --once (manual)"
+      ansible.builtin.raw: "sudo python3 /usr/local/bin/vps-monitor.py --once"
+      register: r_check
+      changed_when: false
+      check_mode: false
+      tags: [check, never]  # only runs with --tags check
+
+    - name: "20 | check | display result"
+      ansible.builtin.debug:
+        msg: "{{ r_check.stdout_lines | default([]) }}"
+      tags: [check, never]
+
+    # --- Summary ---
+    - name: "20 | summary"
+      ansible.builtin.debug:
+        msg:
+          - "============================================"
+          - "MONITORING INSTALLED — vps-prod"
+          - "============================================"
+          - "Timer: vps-monitor.timer (every 5 min)"
+          - "Script: /usr/local/bin/vps-monitor.py"
+          - "Log: /var/log/vps-monitor.log"
+          - ""
+          - "Manual check from Mac:"
+          - "  ./modules/monitoring/bin/run-check"
+          - "  ./modules/monitoring/bin/run-check --test-alert"
+          - ""
+          - "Or directly on VPS:"
+          - "  ssh deploy@<vps> 'sudo python3 /usr/local/bin/vps-monitor.py --once'"
+          - "  ssh deploy@<vps> 'sudo python3 /usr/local/bin/vps-monitor.py --test-alert'"
+          - "============================================"

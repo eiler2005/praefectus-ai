@@ -1,0 +1,221 @@
+---
+# Restic backups to Backblaze B2.
+# Backs up: /opt/maxtg-bridge/data, /opt/openclaw/workspace, /opt/obsidian-vault/wiki
+#
+# Required vault vars:
+#   vault_b2_key_id       — Backblaze B2 application key ID
+#   vault_b2_app_key      — Backblaze B2 application key
+#   vault_b2_bucket       — B2 bucket name (e.g. vps-hetz23-prod-backups)
+#   vault_restic_password — restic repo encryption password (generate: pwgen -s 32 1)
+#
+# Workflow:
+#   ansible-playbook playbooks/30-backup.yml --check --diff        # dry-run (setup steps)
+#   ansible-playbook playbooks/30-backup.yml                       # setup + enable timer
+#   ansible-playbook playbooks/30-backup.yml --tags run            # manual backup now
+#   ansible-playbook playbooks/30-backup.yml --tags status         # show snapshots + timer
+#
+# Schedule: daily at 02:00 UTC (systemd timer, persistent — runs on next boot if missed)
+# Retention: 7 daily, 4 weekly, 3 monthly snapshots
+
+- name: "30 | Restic backup — vps-prod"
+  hosts: vps
+  gather_facts: false
+
+  vars_files:
+    - "{{ playbook_dir }}/../group_vars/all/vault.yml"
+
+  vars:
+    report_dir_local: "{{ playbook_dir }}/../../reports"
+    keep_daily:   7
+    keep_weekly:  4
+    keep_monthly: 3
+
+  tasks:
+
+    # ---- INSTALL ----
+    - name: "30 | install | restic"
+      ansible.builtin.raw: |
+        sudo apt-get install -y restic 2>&1 | tail -3 && echo DONE
+      register: restic_install
+      changed_when: "'DONE' in restic_install.stdout"
+      tags: [setup, install]
+
+    - name: "30 | install | display"
+      ansible.builtin.debug:
+        msg: "restic install: {{ restic_install.stdout_lines | last | default('n/a') }}"
+      tags: [setup, install]
+
+    # ---- ENV FILE (secrets, root-only) ----
+    - name: "30 | config | write /etc/restic/env (mode 600)"
+      ansible.builtin.raw: |
+        sudo mkdir -p /etc/restic
+        sudo tee /etc/restic/env > /dev/null << ENVEOF
+        B2_ACCOUNT_ID={{ vault_b2_key_id }}
+        B2_ACCOUNT_KEY={{ vault_b2_app_key }}
+        RESTIC_REPOSITORY=b2:{{ vault_b2_bucket }}:/vps-prod
+        RESTIC_PASSWORD={{ vault_restic_password }}
+        ENVEOF
+        sudo chmod 600 /etc/restic/env
+        sudo chown root:root /etc/restic/env
+        echo CHANGED
+      register: env_write
+      changed_when: "'CHANGED' in env_write.stdout"
+      tags: [setup]
+
+    # ---- INIT REPO (idempotent) ----
+    - name: "30 | repo | init (skipped if already initialized)"
+      ansible.builtin.raw: |
+        sudo bash -c '
+          set -a; source /etc/restic/env; set +a
+          if restic snapshots --quiet 2>/dev/null; then
+            echo ALREADY_INITIALIZED
+          else
+            restic init && echo INITIALIZED
+          fi
+        '
+      register: restic_init
+      changed_when: "'INITIALIZED' in restic_init.stdout"
+      tags: [setup, init]
+
+    - name: "30 | repo | display init result"
+      ansible.builtin.debug:
+        msg: "{{ restic_init.stdout_lines | default([]) }}"
+      tags: [setup, init]
+
+    # ---- BACKUP SCRIPT ----
+    - name: "30 | script | write /usr/local/bin/vps-backup.sh"
+      ansible.builtin.raw: |
+        sudo tee /usr/local/bin/vps-backup.sh > /dev/null << 'SCRIPTEOF'
+        #!/usr/bin/env bash
+        set -euo pipefail
+        set -a; source /etc/restic/env; set +a
+
+        LOG=/var/log/vps-backup.log
+        log() { echo "$(date -u '+%Y-%m-%d %H:%M:%S') $*" | tee -a "$LOG"; }
+
+        log "=== backup start ==="
+        restic backup \
+          /opt/maxtg-bridge/data \
+          /opt/openclaw/workspace \
+          /opt/obsidian-vault/wiki \
+          --tag vps-prod 2>&1 | tee -a "$LOG"
+
+        log "--- forget/prune ---"
+        restic forget \
+          --keep-daily   7 \
+          --keep-weekly  4 \
+          --keep-monthly 3 \
+          --tag vps-prod \
+          --prune 2>&1 | tee -a "$LOG"
+
+        log "=== backup done ==="
+        SCRIPTEOF
+        sudo chmod 700 /usr/local/bin/vps-backup.sh
+        sudo chown root:root /usr/local/bin/vps-backup.sh
+        echo CHANGED
+      register: script_write
+      changed_when: "'CHANGED' in script_write.stdout"
+      tags: [setup]
+
+    # ---- SYSTEMD SERVICE ----
+    - name: "30 | systemd | write vps-backup.service"
+      ansible.builtin.raw: |
+        sudo tee /etc/systemd/system/vps-backup.service > /dev/null << 'EOF'
+        [Unit]
+        Description=VPS restic backup to Backblaze B2
+        After=network-online.target
+        Wants=network-online.target
+
+        [Service]
+        Type=oneshot
+        ExecStart=/usr/local/bin/vps-backup.sh
+        StandardOutput=journal
+        StandardError=journal
+        EOF
+        echo CHANGED
+      register: service_write
+      changed_when: "'CHANGED' in service_write.stdout"
+      tags: [setup]
+
+    # ---- SYSTEMD TIMER ----
+    - name: "30 | systemd | write vps-backup.timer (daily 02:00 UTC)"
+      ansible.builtin.raw: |
+        sudo tee /etc/systemd/system/vps-backup.timer > /dev/null << 'EOF'
+        [Unit]
+        Description=Daily VPS backup at 02:00 UTC
+
+        [Timer]
+        OnCalendar=*-*-* 02:00:00 UTC
+        Persistent=true
+
+        [Install]
+        WantedBy=timers.target
+        EOF
+        echo CHANGED
+      register: timer_write
+      changed_when: "'CHANGED' in timer_write.stdout"
+      tags: [setup]
+
+    - name: "30 | systemd | daemon-reload + enable + start timer"
+      ansible.builtin.raw: |
+        sudo systemctl daemon-reload
+        sudo systemctl enable vps-backup.timer
+        sudo systemctl start vps-backup.timer
+        echo DONE
+      register: timer_enable
+      changed_when: true
+      tags: [setup]
+
+    # ---- STATUS ----
+    - name: "30 | status | timer"
+      ansible.builtin.raw: |
+        systemctl status vps-backup.timer --no-pager 2>&1 | head -10 || true
+      register: timer_status
+      changed_when: false
+      check_mode: false
+      tags: [setup, status]
+
+    - name: "30 | status | snapshots"
+      ansible.builtin.raw: |
+        sudo bash -c 'set -a; source /etc/restic/env; set +a; restic snapshots --tag vps-prod 2>&1 || echo "(no snapshots yet)"'
+      register: snapshots
+      changed_when: false
+      check_mode: false
+      tags: [setup, status]
+
+    - name: "30 | status | display"
+      ansible.builtin.debug:
+        msg:
+          - "Timer: {{ timer_status.stdout_lines | default([]) }}"
+          - "Snapshots:"
+          - "{{ snapshots.stdout_lines | default([]) }}"
+      tags: [setup, status]
+
+    # ---- MANUAL RUN ----
+    - name: "30 | run | execute backup now"
+      ansible.builtin.raw: "sudo /usr/local/bin/vps-backup.sh"
+      register: backup_run
+      changed_when: true
+      tags: [run]
+
+    - name: "30 | run | display result"
+      ansible.builtin.debug:
+        msg: "{{ backup_run.stdout_lines | default([]) }}"
+      tags: [run]
+
+    # ---- SUMMARY ----
+    - name: "30 | summary"
+      ansible.builtin.debug:
+        msg:
+          - "================================================="
+          - "BACKUP SETUP — vps-prod"
+          - "================================================="
+          - "Repo:      b2:{{ vault_b2_bucket }}:/vps-prod"
+          - "Schedule:  daily 02:00 UTC (persistent timer)"
+          - "Retention: {{ keep_daily }}d / {{ keep_weekly }}w / {{ keep_monthly }}m"
+          - "Log:       /var/log/vps-backup.log"
+          - "-------------------------------------------------"
+          - "Manual run:   ansible-playbook playbooks/30-backup.yml --tags run"
+          - "Check status: ansible-playbook playbooks/30-backup.yml --tags status"
+          - "================================================="
+      tags: [setup]

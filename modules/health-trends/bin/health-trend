@@ -1,0 +1,185 @@
+#!/usr/bin/env bash
+# health-trend — анализ N последних JSON health-отчётов из reports/health/*.json.
+# Выявляет: тренд диска, swap, памяти, нестабильные контейнеры.
+#
+# Usage:
+#   ./modules/health-trends/bin/health-trend            # последние 10
+#   ./modules/health-trends/bin/health-trend --last 30  # последние 30
+#   ./modules/health-trends/bin/health-trend --trend disk  # только диск
+
+set -euo pipefail
+
+REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../../.." && pwd)"
+HEALTH_DIR="${REPO_ROOT}/reports/health"
+
+LAST_N=10
+TREND_FILTER=""  # disk | mem | swap | all (default)
+
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    --last)  LAST_N="${2:-10}"; shift 2 ;;
+    --trend) TREND_FILTER="${2:-all}"; shift 2 ;;
+    *)       echo "Unknown option: $1" >&2; exit 1 ;;
+  esac
+done
+
+if [[ ! -d "${HEALTH_DIR}" ]] || [[ -z "$(ls "${HEALTH_DIR}"/*.json 2>/dev/null)" ]]; then
+  echo "No health reports found in ${HEALTH_DIR}"
+  echo "Run: ansible-playbook playbooks/99-verify.yml"
+  exit 0
+fi
+
+# shellcheck disable=SC2012
+REPORT_FILES=$(ls -t "${HEALTH_DIR}"/*.json 2>/dev/null | head -"${LAST_N}")
+REPORT_COUNT=$(echo "${REPORT_FILES}" | wc -l | tr -d ' ')
+
+if ! command -v python3 &>/dev/null; then
+  echo "ERROR: python3 required for JSON parsing" >&2
+  exit 2
+fi
+
+python3 - "${HEALTH_DIR}" "${LAST_N}" "${TREND_FILTER:-all}" <<'PYEOF'
+import sys, json, os, glob
+from pathlib import Path
+from datetime import datetime
+
+health_dir = sys.argv[1]
+last_n     = int(sys.argv[2])
+filt       = sys.argv[3]  # disk | mem | swap | all
+
+files = sorted(glob.glob(f"{health_dir}/*.json"), reverse=True)[:last_n]
+if not files:
+    print("No JSON files found.")
+    sys.exit(0)
+
+reports = []
+for f in files:
+    try:
+        with open(f) as fh:
+            data = json.load(fh)
+        reports.append(data)
+    except Exception as e:
+        print(f"  SKIP {f}: {e}", file=sys.stderr)
+
+if not reports:
+    print("Could not parse any reports.")
+    sys.exit(0)
+
+reports = list(reversed(reports))  # chronological order
+N = len(reports)
+
+print(f"\n{'='*60}")
+print(f"  Health trend — last {N} reports")
+print(f"{'='*60}")
+print(f"  Range: {reports[0].get('timestamp','?')} → {reports[-1].get('timestamp','?')}")
+print(f"  Overall statuses: " +
+      ", ".join(r.get('overall_status', '?').upper() for r in reports))
+
+def get_metric(r, key, default=0):
+    return r.get('metrics', {}).get(key, default)
+
+# ---- DISK TREND ----
+if filt in ('all', 'disk'):
+    disk_vals = [get_metric(r, 'disk_pct') for r in reports]
+    disk_min  = min(disk_vals)
+    disk_max  = max(disk_vals)
+    disk_last = disk_vals[-1]
+    disk_first = disk_vals[0]
+    if disk_last > disk_first + 2:
+        disk_trend = "↑ GROWING"
+    elif disk_last < disk_first - 2:
+        disk_trend = "↓ shrinking"
+    else:
+        disk_trend = "→ stable"
+
+    print(f"\n  DISK /")
+    print(f"  {'Trend':10s} {disk_trend}")
+    print(f"  {'Range':10s} {disk_min}% – {disk_max}%   last={disk_last}%")
+    print(f"  {'Values':10s} " + "  ".join(f"{v}%" for v in disk_vals))
+    if disk_last >= 90:
+        print(f"  ⚠️  CRITICAL: disk at {disk_last}%!")
+    elif disk_last >= 80:
+        print(f"  ⚠️  WARN: disk at {disk_last}%")
+
+# ---- MEMORY TREND ----
+if filt in ('all', 'mem'):
+    mem_vals  = [get_metric(r, 'mem_available_mb') for r in reports]
+    mem_min   = min(mem_vals)
+    mem_max   = max(mem_vals)
+    mem_last  = mem_vals[-1]
+    mem_first = mem_vals[0]
+    if mem_last < mem_first - 50:
+        mem_trend = "↓ DECREASING"
+    elif mem_last > mem_first + 50:
+        mem_trend = "↑ improving"
+    else:
+        mem_trend = "→ stable"
+
+    print(f"\n  MEMORY (available)")
+    print(f"  {'Trend':10s} {mem_trend}")
+    print(f"  {'Range':10s} {mem_min}M – {mem_max}M   last={mem_last}M")
+    print(f"  {'Values':10s} " + "  ".join(f"{v}M" for v in mem_vals))
+    if mem_last < 200:
+        print(f"  ⚠️  CRITICAL: only {mem_last}M available!")
+    elif mem_last < 500:
+        print(f"  ⚠️  WARN: only {mem_last}M available")
+
+# ---- SWAP TREND ----
+if filt in ('all', 'swap'):
+    swap_vals = [get_metric(r, 'swap_used_pct') for r in reports]
+    swap_last = swap_vals[-1]
+    if any(v >= 80 for v in swap_vals):
+        print(f"\n  SWAP")
+        print(f"  ⚠️  Swap >80% in some reports: " + "  ".join(f"{v}%" for v in swap_vals))
+    elif any(v >= 40 for v in swap_vals):
+        print(f"\n  SWAP")
+        print(f"  ⚠️  Swap 40–80% range: " + "  ".join(f"{v}%" for v in swap_vals))
+    else:
+        print(f"\n  SWAP       OK (max {max(swap_vals)}%)")
+
+# ---- LOAD TREND ----
+if filt == 'all':
+    load_vals = [get_metric(r, 'load_5min', 0.0) for r in reports]
+    load_last = float(load_vals[-1]) if load_vals else 0
+    load_max  = max(float(v) for v in load_vals) if load_vals else 0
+    if load_max >= 4.0:
+        print(f"\n  LOAD (5min)")
+        print(f"  ⚠️  Peaks at {load_max:.2f} — investigate!")
+    elif load_max >= 2.0:
+        print(f"\n  LOAD (5min)")
+        print(f"  ⚠️  WARN peaks: max={load_max:.2f} in window")
+    else:
+        print(f"\n  LOAD (5min)  OK (max {load_max:.2f} in window)")
+
+# ---- CONTAINER STABILITY ----
+if filt == 'all':
+    from collections import Counter
+    all_running = []
+    for r in reports:
+        all_running.extend(r.get('running_containers', []))
+    seen_counts = Counter(all_running)
+    # Expected to appear in every report
+    print(f"\n  CONTAINERS")
+    stable = [c for c, cnt in seen_counts.items() if cnt == N]
+    flapping = [c for c, cnt in seen_counts.items() if cnt < N]
+    missing = [c for c, cnt in seen_counts.items() if cnt < N // 2]
+    if flapping:
+        for c in flapping:
+            cnt = seen_counts[c]
+            print(f"  ⚠️  {c}: present in {cnt}/{N} reports")
+    else:
+        print(f"  All {len(stable)} containers stable across {N} reports")
+
+# ---- OVERALL FAIL HISTORY ----
+if filt == 'all':
+    fail_reports = [r for r in reports if r.get('overall_status') == 'fail']
+    warn_reports = [r for r in reports if r.get('overall_status') == 'warn']
+    if fail_reports:
+        print(f"\n  ⚠️  FAIL in {len(fail_reports)}/{N} reports:")
+        for r in fail_reports:
+            print(f"     {r.get('timestamp','?')}")
+    elif warn_reports:
+        print(f"\n  ⚠️  WARN in {len(warn_reports)}/{N} reports")
+
+print(f"\n{'='*60}\n")
+PYEOF

@@ -1,0 +1,221 @@
+---
+# Security hardening: fail2ban, unattended-upgrades, sshd_baseline, UFW audit.
+#
+# БЕЗОПАСНЫЕ операции (не ломают доступ при корректном выполнении):
+#   - fail2ban: sshd jail (блокирует брутфорс, whitelist в vault)
+#   - unattended-upgrades: только -security патчи, без reboot
+#   - sshd_baseline: проверка + enforce MaxSessions, без изменения auth-параметров
+#   - UFW audit: документировать правила (без изменений)
+#   - SSH authorized_keys: показать список
+#
+# ПОРЯДОК:
+#   ansible-playbook playbooks/40-security.yml --check   (dry-run, показывает план)
+#   ansible-playbook playbooks/40-security.yml           (apply)
+#
+# После apply обязательно:
+#   ./verify.sh   — убедиться что SSH всё ещё работает
+#
+# Whitelist доверенных IP (не блокировать fail2ban):
+#   vault_fail2ban_trusted_ips: ["192.168.1.0/24"]  в vault.yml
+
+- name: "40 | Security hardening — vps-prod"
+  hosts: vps
+  gather_facts: false
+
+  vars:
+    f2b_ban_time:    "{{ vault_fail2ban_ban_time    | default('24h') }}"
+    f2b_find_time:   "{{ vault_fail2ban_find_time   | default('600') }}"
+    f2b_max_retry:   "{{ vault_fail2ban_max_retry   | default(3) }}"
+    f2b_trusted_ips: "{{ vault_fail2ban_trusted_ips | default([]) }}"
+    ssh_max_sessions: 6
+
+  tasks:
+    # ======== AUDIT (всегда первым, read-only) ========
+    - name: "40 | audit | ufw rules"
+      ansible.builtin.raw: "sudo ufw status numbered 2>/dev/null || echo 'ufw not installed'"
+      register: ufw_status
+      changed_when: false
+      check_mode: false
+
+    - name: "40 | audit | sshd_config key params"
+      ansible.builtin.raw: |
+        grep -E "^(PermitRootLogin|PasswordAuthentication|MaxSessions|AllowUsers|AllowGroups)" \
+          /etc/ssh/sshd_config 2>/dev/null || echo "(not found)"
+      register: sshd_params
+      changed_when: false
+      check_mode: false
+
+    - name: "40 | audit | authorized_keys"
+      ansible.builtin.raw: "cat ~/.ssh/authorized_keys 2>/dev/null | head -20 || echo '(empty)'"
+      register: auth_keys
+      changed_when: false
+      check_mode: false
+
+    - name: "40 | audit | fail2ban status"
+      ansible.builtin.raw: "sudo fail2ban-client status sshd 2>/dev/null || echo 'fail2ban not running / sshd jail not configured'"
+      register: f2b_current
+      changed_when: false
+      check_mode: false
+      failed_when: false
+
+    - name: "40 | audit | display"
+      ansible.builtin.debug:
+        msg:
+          - "=== AUDIT ==="
+          - "UFW rules:"
+          - "{{ ufw_status.stdout_lines }}"
+          - "sshd key params:"
+          - "{{ sshd_params.stdout_lines }}"
+          - "fail2ban sshd:"
+          - "{{ f2b_current.stdout_lines }}"
+          - "authorized_keys (first 20):"
+          - "{{ auth_keys.stdout_lines }}"
+
+    # ======== FAIL2BAN ========
+    - name: "40 | fail2ban | install"
+      ansible.builtin.raw: |
+        dpkg -l fail2ban 2>/dev/null | grep -q '^ii' || \
+          (sudo apt-get install -y fail2ban 2>&1 | tail -3 && echo INSTALLED)
+      register: f2b_install
+      changed_when: "'INSTALLED' in f2b_install.stdout"
+
+    - name: "40 | fail2ban | configure jail.local"
+      ansible.builtin.raw: |
+        sudo tee /etc/fail2ban/jail.local > /dev/null << 'EOF'
+        [DEFAULT]
+        bantime  = {{ f2b_ban_time }}
+        findtime = {{ f2b_find_time }}
+        maxretry = {{ f2b_max_retry }}
+        ignoreip = 127.0.0.1/8 ::1{% for ip in f2b_trusted_ips %} {{ ip }}{% endfor %}
+
+        [sshd]
+        enabled  = true
+        port     = ssh
+        filter   = sshd
+        logpath  = /var/log/auth.log
+        backend  = systemd
+        EOF
+        echo CHANGED
+      register: f2b_config
+      changed_when: "'CHANGED' in f2b_config.stdout"
+
+    - name: "40 | fail2ban | enable + restart if config changed"
+      ansible.builtin.raw: |
+        sudo systemctl enable fail2ban 2>/dev/null
+        sudo systemctl restart fail2ban && echo RESTARTED
+      register: f2b_restart
+      changed_when: "'RESTARTED' in f2b_restart.stdout"
+      when: f2b_config.changed or f2b_install.changed
+
+    - name: "40 | fail2ban | verify sshd jail active"
+      ansible.builtin.raw: "sudo fail2ban-client status sshd 2>/dev/null | grep 'Currently banned'"
+      register: f2b_verify
+      changed_when: false
+      check_mode: false
+      failed_when: false
+
+    - name: "40 | fail2ban | display status"
+      ansible.builtin.debug:
+        msg: "fail2ban sshd: {{ f2b_verify.stdout | trim | default('check: sudo fail2ban-client status sshd') }}"
+
+    # ======== UNATTENDED-UPGRADES ========
+    - name: "40 | unattended | install"
+      ansible.builtin.raw: |
+        dpkg -l unattended-upgrades 2>/dev/null | grep -q '^ii' || \
+          (sudo apt-get install -y unattended-upgrades 2>&1 | tail -3 && echo INSTALLED)
+      register: uu_install
+      changed_when: "'INSTALLED' in uu_install.stdout"
+
+    - name: "40 | unattended | configure 50unattended-upgrades"
+      ansible.builtin.raw: |
+        sudo tee /etc/apt/apt.conf.d/50unattended-upgrades > /dev/null << 'EOF'
+        // Managed by vps_management — security patches only, no auto-reboot.
+        Unattended-Upgrade::Allowed-Origins {
+            "${distro_id}:${distro_codename}-security";
+        };
+        Unattended-Upgrade::DevRelease "false";
+        Unattended-Upgrade::AutoFixInterruptedDpkg "true";
+        Unattended-Upgrade::MinimalSteps "true";
+        Unattended-Upgrade::Remove-Unused-Dependencies "true";
+        Unattended-Upgrade::Automatic-Reboot "false";
+        Unattended-Upgrade::Mail "";
+        EOF
+        echo CHANGED
+      register: uu_config
+      changed_when: "'CHANGED' in uu_config.stdout"
+
+    - name: "40 | unattended | configure 20auto-upgrades"
+      ansible.builtin.raw: |
+        sudo tee /etc/apt/apt.conf.d/20auto-upgrades > /dev/null << 'EOF'
+        APT::Periodic::Update-Package-Lists "1";
+        APT::Periodic::Unattended-Upgrade "1";
+        APT::Periodic::Download-Upgradeable-Packages "1";
+        APT::Periodic::AutocleanInterval "7";
+        EOF
+        echo CHANGED
+      register: uu_auto
+      changed_when: "'CHANGED' in uu_auto.stdout"
+
+    # ======== SSHD BASELINE ========
+    - name: "40 | sshd | check current MaxSessions"
+      ansible.builtin.raw: "grep -E '^MaxSessions' /etc/ssh/sshd_config 2>/dev/null || echo 'MaxSessions (default=10)'"
+      register: sshd_maxsessions
+      changed_when: false
+      check_mode: false
+
+    - name: "40 | sshd | enforce MaxSessions {{ ssh_max_sessions }}"
+      ansible.builtin.raw: |
+        if grep -qE '^MaxSessions' /etc/ssh/sshd_config; then
+          sudo sed -i 's/^MaxSessions.*/MaxSessions {{ ssh_max_sessions }}/' /etc/ssh/sshd_config
+        else
+          echo "MaxSessions {{ ssh_max_sessions }}" | sudo tee -a /etc/ssh/sshd_config
+        fi
+        # Validate config before reload
+        sudo sshd -t && echo CONFIG_OK || echo CONFIG_ERROR
+      register: sshd_set
+      changed_when: "'CONFIG_OK' in sshd_set.stdout"
+
+    - name: "40 | sshd | fail if config invalid"
+      ansible.builtin.fail:
+        msg: "sshd -t returned error — check /etc/ssh/sshd_config!"
+      when: "'CONFIG_ERROR' in (sshd_set.stdout | default(''))"
+
+    - name: "40 | sshd | reload sshd if config changed"
+      ansible.builtin.raw: "sudo systemctl reload sshd && echo RELOADED"
+      register: sshd_reload
+      changed_when: "'RELOADED' in sshd_reload.stdout"
+      when: sshd_set.changed
+
+    - name: "40 | sshd | verify critical params (warn only)"
+      ansible.builtin.raw: |
+        issues=""
+        grep -qE '^PermitRootLogin (no|prohibit-password)' /etc/ssh/sshd_config || \
+          issues="${issues}WARN: PermitRootLogin not explicitly disabled. "
+        grep -qE '^PasswordAuthentication no' /etc/ssh/sshd_config || \
+          issues="${issues}WARN: PasswordAuthentication not explicitly disabled. "
+        echo "${issues:-ALL_OK}"
+      register: sshd_check
+      changed_when: false
+      check_mode: false
+
+    - name: "40 | sshd | display baseline check"
+      ansible.builtin.debug:
+        msg: "sshd baseline: {{ sshd_check.stdout | trim }}"
+
+    # ======== SUMMARY ========
+    - name: "40 | summary"
+      ansible.builtin.debug:
+        msg:
+          - "================================================="
+          - "SECURITY HARDENING SUMMARY"
+          - "================================================="
+          - "fail2ban:          {{ 'configured (ban=' ~ f2b_ban_time ~ ', maxretry=' ~ f2b_max_retry ~ ')' if not f2b_config.skipped | default(false) else 'check mode' }}"
+          - "unattended-upgrades: {{ 'configured (security only, no-reboot)' if not uu_config.skipped | default(false) else 'check mode' }}"
+          - "sshd MaxSessions:  {{ ssh_max_sessions }}"
+          - "sshd baseline:     {{ sshd_check.stdout | trim }}"
+          - "================================================="
+          - "Next steps:"
+          - "  ./verify.sh                     — confirm SSH still works"
+          - "  docs/firewall.md                — document UFW rules"
+          - "  docs/runbooks/security-incident.md — read this!"
+          - "================================================="

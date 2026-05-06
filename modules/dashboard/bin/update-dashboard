@@ -1,0 +1,168 @@
+#!/usr/bin/env bash
+# update-dashboard — обновляет docs/dashboard.md из последних отчётов.
+# Читает: reports/health/*.json, reports/cleanup-*.md, reports/syncthing-audit-*.md
+#
+# Usage:
+#   ./modules/dashboard/bin/update-dashboard         # update docs/dashboard.md
+#   ./modules/dashboard/bin/update-dashboard --print # print to stdout, don't write
+
+set -euo pipefail
+
+REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../../.." && pwd)"
+HEALTH_DIR="${REPO_ROOT}/reports/health"
+REPORTS_DIR="${REPO_ROOT}/reports"
+DASHBOARD="${REPO_ROOT}/docs/dashboard.md"
+
+WRITE=1
+[[ "${1:-}" == "--print" ]] && WRITE=0
+
+TS_NOW=$(date -u "+%Y-%m-%d %H:%M UTC")
+
+# ---- Last health JSON ----
+HEALTH_STATUS="unknown"
+HEALTH_TS="(no health reports yet)"
+HEALTH_DISK="?"
+HEALTH_MEM="?"
+HEALTH_LOAD="?"
+HEALTH_SWAP="?"
+
+if command -v python3 &>/dev/null; then
+  LATEST_JSON=$(ls -t "${HEALTH_DIR}"/*.json 2>/dev/null | head -1 || true)
+  if [[ -n "${LATEST_JSON}" ]]; then
+    HEALTH_DATA=$(python3 - "${LATEST_JSON}" <<'PYEOF'
+import json, sys
+with open(sys.argv[1]) as f:
+    d = json.load(f)
+m = d.get("metrics", {})
+print(d.get("overall_status", "?"))
+print(d.get("timestamp", "?"))
+print(m.get("disk_pct", "?"))
+print(m.get("mem_available_mb", "?"))
+print(m.get("load_5min", "?"))
+print(m.get("swap_used_pct", "?"))
+PYEOF
+)
+    HEALTH_STATUS=$(echo "${HEALTH_DATA}" | sed -n '1p')
+    HEALTH_TS=$(echo "${HEALTH_DATA}" | sed -n '2p')
+    HEALTH_DISK=$(echo "${HEALTH_DATA}" | sed -n '3p')
+    HEALTH_MEM=$(echo "${HEALTH_DATA}" | sed -n '4p')
+    HEALTH_LOAD=$(echo "${HEALTH_DATA}" | sed -n '5p')
+    HEALTH_SWAP=$(echo "${HEALTH_DATA}" | sed -n '6p')
+  fi
+fi
+
+# Status icon
+case "${HEALTH_STATUS}" in
+  ok)   STATUS_ICON="✅" ;;
+  warn) STATUS_ICON="⚠️" ;;
+  fail) STATUS_ICON="🔴" ;;
+  *)    STATUS_ICON="❓" ;;
+esac
+
+# ---- Last cleanup ----
+CLEANUP_TS="(no cleanup reports yet)"
+CLEANUP_FREED="?"
+LATEST_CLEANUP=$(ls -t "${REPORTS_DIR}"/cleanup-*.md 2>/dev/null | head -1 || true)
+if [[ -n "${LATEST_CLEANUP}" ]]; then
+  CLEANUP_TS=$(basename "${LATEST_CLEANUP}" .md | sed 's/cleanup-//')
+  # Try to extract freed line: "| Freed  | 1234M |"
+  CLEANUP_FREED=$(grep '| Freed  |' "${LATEST_CLEANUP}" 2>/dev/null | awk -F'|' '{gsub(/ /,"",$3); print $3}' || echo "?")
+fi
+
+# ---- Last syncthing audit ----
+SYNC_TS="(not run)"
+SYNC_CONFLICTS="?"
+LATEST_SYNC=$(ls -t "${REPORTS_DIR}"/syncthing-audit-*.md 2>/dev/null | head -1 || true)
+if [[ -n "${LATEST_SYNC}" ]]; then
+  SYNC_TS=$(basename "${LATEST_SYNC}" .md | sed 's/syncthing-audit-//')
+  CONFLICT_LINE=$(grep -c "sync-conflict" "${LATEST_SYNC}" 2>/dev/null || echo "0")
+  SYNC_CONFLICTS="${CONFLICT_LINE}"
+fi
+
+# ---- Health trend (last 5) ----
+TREND_SUMMARY="(need ≥2 reports)"
+if command -v python3 &>/dev/null; then
+  TREND_FILES=$(ls -t "${HEALTH_DIR}"/*.json 2>/dev/null | head -5 || true)
+  if [[ $(echo "${TREND_FILES}" | grep -c '.json' || echo 0) -ge 2 ]]; then
+    TREND_SUMMARY=$(python3 - "${HEALTH_DIR}" <<'PYEOF'
+import json, glob, sys
+files = sorted(glob.glob(f"{sys.argv[1]}/*.json"), reverse=True)[:5]
+statuses = []
+disk_vals = []
+for f in files:
+    try:
+        d = json.load(open(f))
+        statuses.append(d.get("overall_status","?")[0].upper())
+        disk_vals.append(d.get("metrics",{}).get("disk_pct",0))
+    except Exception:
+        pass
+if not statuses:
+    print("no data")
+else:
+    disk_trend = "→"
+    if len(disk_vals) >= 2:
+        if disk_vals[0] > disk_vals[-1] + 2:
+            disk_trend = "↑ growing"
+        elif disk_vals[0] < disk_vals[-1] - 2:
+            disk_trend = "↓ shrinking"
+        else:
+            disk_trend = "→ stable"
+    print(f"last 5: [{' '.join(reversed(statuses))}]  disk: {disk_trend}")
+PYEOF
+) || TREND_SUMMARY="error"
+  fi
+fi
+
+# ---- Build dashboard ----
+DASHBOARD_CONTENT="# VPS dashboard — vps-prod
+
+> Updated: ${TS_NOW}
+
+## Status
+
+${STATUS_ICON} **$(echo "${HEALTH_STATUS}" | tr '[:lower:]' '[:upper:]')** — last check: \`${HEALTH_TS}\`
+
+| Metric | Value |
+|---|---|
+| Disk / | ${HEALTH_DISK}% |
+| RAM available | ${HEALTH_MEM} MB |
+| Load 5min | ${HEALTH_LOAD} |
+| Swap | ${HEALTH_SWAP}% |
+
+## Recent events
+
+| Event | When | Detail |
+|---|---|---|
+| Last verify | ${HEALTH_TS} | status=${HEALTH_STATUS} |
+| Last cleanup | ${CLEANUP_TS} | freed=${CLEANUP_FREED} |
+| Last syncthing | ${SYNC_TS} | conflicts=${SYNC_CONFLICTS} |
+
+## Trend (last 5 checks)
+
+\`${TREND_SUMMARY}\`
+
+## Quick commands
+
+\`\`\`bash
+./verify.sh                                 # health check
+./modules/monitoring/bin/run-check          # live check + Telegram alert
+./modules/monitoring/bin/run-check --log    # view monitor log
+./modules/port-audit/bin/port-audit         # port conflict scan
+./modules/dashboard/bin/update-dashboard    # refresh this file
+\`\`\`
+
+## Links
+
+- [containers.md](containers.md) — все Docker контейнеры + mem limits
+- [ports.md](ports.md) — карта портов
+- [firewall.md](firewall.md) — UFW правила
+- [runbooks/maintenance-schedule.md](runbooks/maintenance-schedule.md) — расписание профилактики
+- [runbooks/health-rules.md](runbooks/health-rules.md) — правила OK/WARN/CRIT
+"
+
+if [[ "${WRITE}" -eq 1 ]]; then
+  printf '%s\n' "${DASHBOARD_CONTENT}" > "${DASHBOARD}"
+  echo "Updated: ${DASHBOARD}" >&2
+else
+  printf '%s\n' "${DASHBOARD_CONTENT}"
+fi

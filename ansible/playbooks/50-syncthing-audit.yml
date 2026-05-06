@@ -1,0 +1,195 @@
+---
+# Syncthing audit: конфликты, подключение Mac, файлы > 100MB, использование пространства.
+#
+# Читает SYNCTHING_API_KEY из vault (vault_syncthing_api_key).
+# Если ключ не задан — API-проверка пропускается, filesystem audit запускается.
+#
+# Workflow:
+#   ansible-playbook playbooks/50-syncthing-audit.yml --check   (синтаксис)
+#   ansible-playbook playbooks/50-syncthing-audit.yml           (запустить аудит)
+#
+# Отчёт сохраняется в reports/syncthing-audit-<timestamp>.md
+
+- name: "50 | Syncthing audit — vps-prod"
+  hosts: vps
+  gather_facts: false
+
+  vars:
+    report_dir_local:    "{{ playbook_dir }}/../../reports"
+    syncthing_api_key:   "{{ vault_syncthing_api_key | default('') }}"
+    syncthing_api_url:   "http://127.0.0.1:8384"
+    obsidian_vault_path: "/opt/obsidian-vault"
+    large_file_mb: 100
+
+  tasks:
+    - name: "50 | init | timestamp"
+      ansible.builtin.raw: "date -u +%Y%m%dT%H%M%S"
+      register: audit_ts
+      changed_when: false
+      check_mode: false
+
+    # ---- CONFLICT FILES ----
+    - name: "50 | conflicts | find *.sync-conflict-* files"
+      ansible.builtin.raw: |
+        find {{ obsidian_vault_path }} -name "*.sync-conflict-*" -type f 2>/dev/null \
+          | xargs -I{} sh -c 'echo "$(du -sh {} | cut -f1) {}"' 2>/dev/null \
+          | sort -h || echo "(none)"
+      register: conflicts
+      changed_when: false
+      check_mode: false
+      failed_when: false
+
+    - name: "50 | conflicts | display"
+      ansible.builtin.debug:
+        msg:
+          - "Sync conflict files in {{ obsidian_vault_path }}:"
+          - "{{ conflicts.stdout_lines | default(['(none)']) }}"
+
+    # ---- LARGE FILES ----
+    - name: "50 | large | files > {{ large_file_mb }}MB in obsidian-vault"
+      ansible.builtin.raw: |
+        find {{ obsidian_vault_path }} -type f -size +{{ large_file_mb }}M 2>/dev/null \
+          | xargs -I{} sh -c 'echo "$(du -sh {} | cut -f1) {}"' 2>/dev/null \
+          | sort -hr | head -20 || echo "(none)"
+      register: large_files
+      changed_when: false
+      check_mode: false
+      failed_when: false
+
+    - name: "50 | large | display"
+      ansible.builtin.debug:
+        msg:
+          - "Files > {{ large_file_mb }}MB (can break sync bandwidth):"
+          - "{{ large_files.stdout_lines | default(['(none)']) }}"
+
+    # ---- DISK USAGE ----
+    - name: "50 | disk | obsidian-vault total size"
+      ansible.builtin.raw: |
+        du -sh {{ obsidian_vault_path }} 2>/dev/null | cut -f1 || echo "n/a"
+      register: vault_size
+      changed_when: false
+      check_mode: false
+
+    - name: "50 | disk | obsidian-vault top dirs"
+      ansible.builtin.raw: |
+        du -sh {{ obsidian_vault_path }}/* 2>/dev/null | sort -hr | head -10 || echo "n/a"
+      register: vault_dirs
+      changed_when: false
+      check_mode: false
+
+    # ---- SYNCTHING API (если API ключ задан) ----
+    - name: "50 | api | ping syncthing"
+      ansible.builtin.raw: |
+        curl -sS --max-time 5 \
+          -H "X-API-Key: {{ syncthing_api_key }}" \
+          {{ syncthing_api_url }}/rest/system/ping 2>&1 || echo "FAIL"
+      register: st_ping
+      changed_when: false
+      check_mode: false
+      failed_when: false
+      when: syncthing_api_key | length > 0
+
+    - name: "50 | api | check peer connections"
+      ansible.builtin.raw: |
+        curl -sS --max-time 5 \
+          -H "X-API-Key: {{ syncthing_api_key }}" \
+          {{ syncthing_api_url }}/rest/system/connections 2>/dev/null | \
+          python3 -c "
+        import json,sys
+        data=json.load(sys.stdin)
+        conns=data.get('connections',{})
+        total=len(conns)
+        connected=[k for k,v in conns.items() if v.get('connected')]
+        print(f'Total peers: {total}  Connected: {len(connected)}')
+        for k in connected:
+            v=conns[k]
+            print(f'  CONNECTED: {k} address={v.get(\"address\",\"?\")}')
+        for k in [x for x in conns if x not in connected]:
+            print(f'  DISCONNECTED: {k}')
+        " 2>/dev/null || echo "API error or not running"
+      register: st_connections
+      changed_when: false
+      check_mode: false
+      failed_when: false
+      when: syncthing_api_key | length > 0
+
+    - name: "50 | api | display connections"
+      ansible.builtin.debug:
+        msg:
+          - "Syncthing API ping: {{ st_ping.stdout | trim | default('(skipped — API key not set)') }}"
+          - "Syncthing connections:"
+          - "{{ st_connections.stdout_lines | default(['(skipped — API key not set)']) }}"
+      when: syncthing_api_key | length > 0
+
+    - name: "50 | api | note if key missing"
+      ansible.builtin.debug:
+        msg: "NOTE: vault_syncthing_api_key not set — API checks skipped. Add key to run full audit."
+      when: syncthing_api_key | length == 0
+
+    # ---- WRITE REPORT ----
+    - name: "50 | report | write syncthing-audit-{{ audit_ts.stdout | trim }}.md"
+      ansible.builtin.copy:
+        dest: "{{ report_dir_local }}/syncthing-audit-{{ audit_ts.stdout | trim }}.md"
+        mode: "0644"
+        content: |
+          # Syncthing audit — {{ inventory_hostname }} — {{ audit_ts.stdout | trim }}
+
+          ## Obsidian vault
+
+          | Метрика | Значение |
+          |---|---|
+          | Total size | {{ vault_size.stdout | trim }} |
+          | Path | {{ obsidian_vault_path }} |
+
+          ## Top directories
+
+          ```
+          {{ vault_dirs.stdout | default('n/a') }}
+          ```
+
+          ## Conflict files (*.sync-conflict-*)
+
+          ```
+          {{ conflicts.stdout | default('(none)') }}
+          ```
+
+          {% if (conflicts.stdout | trim) != '(none)' and conflicts.stdout | trim | length > 0 %}
+          ⚠️ **Action required:** resolve conflict files manually or via `syncthing-resolve` script.
+          {% endif %}
+
+          ## Large files (> {{ large_file_mb }}MB)
+
+          ```
+          {{ large_files.stdout | default('(none)') }}
+          ```
+
+          {% if syncthing_api_key | length > 0 %}
+          ## Syncthing connections
+
+          ```
+          {{ st_connections.stdout | default('n/a') }}
+          ```
+          {% else %}
+          ## Syncthing connections
+
+          API key not configured — skipped. Add `vault_syncthing_api_key` to vault.yml.
+          {% endif %}
+      delegate_to: localhost
+      become: false
+      check_mode: false
+
+    # ---- SUMMARY ----
+    - name: "50 | summary"
+      ansible.builtin.debug:
+        msg:
+          - "================================================="
+          - "SYNCTHING AUDIT — {{ audit_ts.stdout | trim }}"
+          - "================================================="
+          - "Vault size:     {{ vault_size.stdout | trim }}"
+          - "Conflicts:      {{ conflicts.stdout_lines | select('match', '.*sync-conflict.*') | list | length }} files"
+          - "Large (>{{ large_file_mb }}MB): {{ large_files.stdout_lines | reject('equalto', '(none)') | list | length }} files"
+          - "API key:        {{ 'configured' if syncthing_api_key | length > 0 else 'NOT SET (add vault_syncthing_api_key)' }}"
+          - "Report:         reports/syncthing-audit-{{ audit_ts.stdout | trim }}.md"
+          - "================================================="
+          - "{{ 'ACTION: ' ~ (conflicts.stdout_lines | select('match', '.*sync-conflict.*') | list | length) ~ ' conflict file(s) to resolve!' if (conflicts.stdout_lines | select('match', '.*sync-conflict.*') | list | length) > 0 else 'No conflicts found.' }}"
+          - "================================================="

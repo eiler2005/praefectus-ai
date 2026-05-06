@@ -1,5 +1,7 @@
 # vps_management
 
+> 📋 **Полный индекс инструментов, playbooks, runbooks и TODO** — [`docs/overview.md`](docs/overview.md)
+
 Централизованный оркестратор для одного Hetzner CX23 VPS (Ubuntu 24.04, 4GB RAM, 40GB диск). Управляет **хостом** (диск, OS, sshd, ufw, мониторинг, бэкап, секреты доступа). Не управляет **приложениями** — это зоны других проектов в этом монорепо.
 
 Источник истины для VPS access — `ansible/secrets/vault.yml` (ansible-vault encrypted).

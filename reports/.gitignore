@@ -1,0 +1,8 @@
+# All report files are local-only (not committed)
+*
+!.gitignore
+!.gitkeep
+
+# Sub-dirs created at runtime
+health/
+maintenance/

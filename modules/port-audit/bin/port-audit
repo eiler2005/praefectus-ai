@@ -1,0 +1,233 @@
+#!/usr/bin/env bash
+# port-audit — сравнивает реальные listeners на VPS с docs/ports.md.
+# Выявляет: новые/потерянные порты, небезопасные bindings (0.0.0.0 вместо 127.0.0.1).
+#
+# Usage:
+#   ./modules/port-audit/bin/port-audit            # audit + print
+#   ./modules/port-audit/bin/port-audit --save     # + write reports/port-audit-<ts>.txt
+#   ./modules/port-audit/bin/port-audit --live-only  # только текущие listeners, без сравнения
+
+set -euo pipefail
+
+REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../../.." && pwd)"
+VAULT_FILE="${REPO_ROOT}/ansible/group_vars/all/vault.yml"
+PORTS_DOC="${REPO_ROOT}/docs/ports.md"
+REPORTS_DIR="${REPO_ROOT}/reports"
+
+SAVE_REPORT=0
+LIVE_ONLY=0
+for arg in "$@"; do
+  case "${arg}" in
+    --save)      SAVE_REPORT=1 ;;
+    --live-only) LIVE_ONLY=1 ;;
+  esac
+done
+
+TS=$(date -u +%Y%m%dT%H%M%S)
+
+# ---- SSH credentials from vault ----
+if [[ ! -f "${VAULT_FILE}" ]]; then
+  echo "ERROR: vault not found: ${VAULT_FILE}" >&2
+  exit 2
+fi
+
+VAULT_CONTENT=$(ansible-vault view "${VAULT_FILE}")
+VPS_HOST=$(echo "${VAULT_CONTENT}" | awk -F'"' '/^vault_vps_ssh_host:/ {print $2; exit}')
+VPS_USER=$(echo "${VAULT_CONTENT}" | awk -F'"' '/^vault_vps_ssh_user:/ {print $2; exit}')
+VPS_PORT=$(echo "${VAULT_CONTENT}" | awk '/^vault_vps_ssh_port:/ {print $2; exit}')
+VPS_PORT="${VPS_PORT:-22}"
+
+if [[ -z "${VPS_HOST}" || -z "${VPS_USER}" ]]; then
+  echo "ERROR: vault_vps_ssh_host or vault_vps_ssh_user not set" >&2
+  exit 2
+fi
+
+SSH_OPTS=(-p "${VPS_PORT}" -o ConnectTimeout=10 -o ServerAliveInterval=15 -o BatchMode=yes)
+
+# ---- Collect live port data from VPS ----
+echo "Collecting port data from ${VPS_USER}@${VPS_HOST}:${VPS_PORT}..." >&2
+
+RAW_DATA=$(ssh "${SSH_OPTS[@]}" "${VPS_USER}@${VPS_HOST}" '
+  echo "=== SS_TCP ==="
+  ss -tlnp 2>/dev/null || netstat -tlnp 2>/dev/null || echo "ss/netstat n/a"
+  echo "=== SS_UDP ==="
+  ss -ulnp 2>/dev/null | tail -n +2 || echo "(none)"
+  echo "=== DOCKER_PORTS ==="
+  docker ps --format "{{.Names}} {{.Ports}}" 2>/dev/null || echo "docker n/a"
+')
+
+SS_TCP=$(echo "${RAW_DATA}" | awk '/^=== SS_TCP ===/,/^=== SS_UDP ===/' | grep -v '^=== ')
+SS_UDP=$(echo "${RAW_DATA}" | awk '/^=== SS_UDP ===/,/^=== DOCKER_PORTS ===/' | grep -v '^=== ')
+DOCKER_PORTS=$(echo "${RAW_DATA}" | awk '/^=== DOCKER_PORTS ===/,0' | grep -v '^=== ')
+
+# ---- Parse listening TCP ports ----
+# ss output: State Recv-Q Send-Q Local-Address:Port Peer ...
+# We want Local-Address and Port columns
+declare -A LIVE_PORTS  # "addr:port" -> "process info"
+
+while IFS= read -r line; do
+  # Skip header and empty
+  [[ "${line}" =~ ^State ]] && continue
+  [[ -z "${line}" ]] && continue
+
+  addr_port=$(echo "${line}" | awk '{print $4}')
+  proc=$(echo "${line}" | awk '{print $NF}')
+
+  # Parse addr:port (handle IPv6 like [::]:22 and 127.0.0.1:8020)
+  if [[ "${addr_port}" =~ ^\[.*\]:([0-9]+)$ ]]; then
+    port="${BASH_REMATCH[1]}"
+    addr="[::]"
+  elif [[ "${addr_port}" =~ ^(.*):([0-9]+)$ ]]; then
+    addr="${BASH_REMATCH[1]}"
+    port="${BASH_REMATCH[2]}"
+  else
+    continue
+  fi
+
+  LIVE_PORTS["${addr}:${port}"]="${proc}"
+done <<< "${SS_TCP}"
+
+if [[ "${LIVE_ONLY}" -eq 1 ]]; then
+  echo ""
+  echo "=== Live TCP listeners ==="
+  printf "%-25s %s\n" "Address:Port" "Process"
+  printf "%-25s %s\n" "------------" "-------"
+  for key in $(echo "${!LIVE_PORTS[@]}" | tr ' ' '\n' | sort); do
+    printf "%-25s %s\n" "${key}" "${LIVE_PORTS[${key}]}"
+  done
+
+  echo ""
+  echo "=== Docker port bindings ==="
+  echo "${DOCKER_PORTS}"
+  exit 0
+fi
+
+# ---- Expected ports from docs/ports.md ----
+# Parse public ports table
+declare -A EXPECTED_PUBLIC   # port -> bind description
+declare -A EXPECTED_PRIVATE  # port -> bind description
+
+if [[ -f "${PORTS_DOC}" ]]; then
+  # Public ports (0.0.0.0)
+  while IFS='|' read -r _ port proto service proc owner hc _; do
+    port=$(echo "${port}" | tr -d ' ')
+    [[ "${port}" =~ ^[0-9]+$ ]] || continue
+    EXPECTED_PUBLIC["${port}"]="public"
+  done < <(awk '/## Публичные порты/,/## Приватные порты/' "${PORTS_DOC}" | grep '|')
+
+  # Private ports (127.0.0.1)
+  while IFS='|' read -r _ port proto service proc owner hc _; do
+    port=$(echo "${port}" | tr -d ' ')
+    [[ "${port}" =~ ^[0-9]+$ ]] || continue
+    EXPECTED_PRIVATE["${port}"]="private"
+  done < <(awk '/## Приватные порты/,/## Внутренние docker-сети/' "${PORTS_DOC}" | grep '|')
+else
+  echo "WARN: docs/ports.md not found — running in live-only mode" >&2
+  LIVE_ONLY=1
+fi
+
+# ---- Build report ----
+REPORT=""
+ISSUES_FOUND=0
+
+REPORT+="Port Audit — vps-prod — ${TS}"$'\n'
+REPORT+="=================================="$'\n\n'
+
+REPORT+="Live TCP listeners:"$'\n'
+REPORT+=$(printf "%-25s %s\n" "Address:Port" "Process")$'\n'
+REPORT+=$(printf "%-25s %s\n" "------------" "-------")$'\n'
+for key in $(echo "${!LIVE_PORTS[@]}" | tr ' ' '\n' | sort); do
+  REPORT+=$(printf "%-25s %s\n" "${key}" "${LIVE_PORTS[${key}]}")$'\n'
+done
+REPORT+=$'\n'
+
+# ---- Check for unsafe bindings ----
+REPORT+="Security checks:"$'\n'
+UNSAFE_FOUND=0
+for key in "${!LIVE_PORTS[@]}"; do
+  addr=$(echo "${key}" | sed 's/:[0-9]*$//')
+  port=$(echo "${key}" | grep -oE '[0-9]+$')
+
+  # Port expected private but bound to 0.0.0.0 or [::]
+  if [[ -n "${EXPECTED_PRIVATE[${port}]+x}" ]]; then
+    if [[ "${addr}" == "0.0.0.0" ]] || [[ "${addr}" == "[::]" ]] || [[ "${addr}" == "*" ]]; then
+      REPORT+="  ⚠️  UNSAFE BINDING: port ${port} should be 127.0.0.1 but is on ${addr}"$'\n'
+      ISSUES_FOUND=$((ISSUES_FOUND + 1))
+      UNSAFE_FOUND=1
+    fi
+  fi
+done
+if [[ "${UNSAFE_FOUND}" -eq 0 ]]; then
+  REPORT+="  OK — no unsafe public bindings detected"$'\n'
+fi
+REPORT+=$'\n'
+
+# ---- New ports not in docs ----
+REPORT+="New/unexpected ports (not in docs/ports.md):"$'\n'
+NEW_FOUND=0
+for key in "${!LIVE_PORTS[@]}"; do
+  addr=$(echo "${key}" | sed 's/:[0-9]*$//')
+  port=$(echo "${key}" | grep -oE '[0-9]+$')
+
+  if [[ -z "${EXPECTED_PUBLIC[${port}]+x}" ]] && [[ -z "${EXPECTED_PRIVATE[${port}]+x}" ]]; then
+    REPORT+="  NEW: ${key} (${LIVE_PORTS[${key}]})"$'\n'
+    NEW_FOUND=1
+    # Only flag as issue if it's public-facing
+    if [[ "${addr}" == "0.0.0.0" ]] || [[ "${addr}" == "[::]" ]] || [[ "${addr}" == "*" ]]; then
+      ISSUES_FOUND=$((ISSUES_FOUND + 1))
+    fi
+  fi
+done
+if [[ "${NEW_FOUND}" -eq 0 ]]; then
+  REPORT+="  OK — all listeners match docs/ports.md"$'\n'
+fi
+REPORT+=$'\n'
+
+# ---- Missing expected ports ----
+REPORT+="Missing expected ports:"$'\n'
+MISSING_FOUND=0
+for port in "${!EXPECTED_PUBLIC[@]}" "${!EXPECTED_PRIVATE[@]}"; do
+  # Check if this port appears in any listener
+  found=0
+  for key in "${!LIVE_PORTS[@]}"; do
+    key_port=$(echo "${key}" | grep -oE '[0-9]+$')
+    if [[ "${key_port}" == "${port}" ]]; then
+      found=1
+      break
+    fi
+  done
+  if [[ "${found}" -eq 0 ]]; then
+    REPORT+="  MISSING: port ${port} (expected in docs/ports.md)"$'\n'
+    MISSING_FOUND=1
+  fi
+done
+if [[ "${MISSING_FOUND}" -eq 0 ]]; then
+  REPORT+="  OK — all expected ports are listening"$'\n'
+fi
+REPORT+=$'\n'
+
+# ---- Docker ports ----
+REPORT+="Docker container port bindings:"$'\n'
+REPORT+="${DOCKER_PORTS}"$'\n\n'
+
+# ---- Summary ----
+REPORT+="=================================="$'\n'
+if [[ "${ISSUES_FOUND}" -gt 0 ]]; then
+  REPORT+="RESULT: ${ISSUES_FOUND} issue(s) found — see above"$'\n'
+else
+  REPORT+="RESULT: OK — no issues found"$'\n'
+fi
+REPORT+="=================================="$'\n'
+
+echo "${REPORT}"
+
+if [[ "${SAVE_REPORT}" -eq 1 ]]; then
+  mkdir -p "${REPORTS_DIR}"
+  REPORT_PATH="${REPORTS_DIR}/port-audit-${TS}.txt"
+  printf '%s' "${REPORT}" > "${REPORT_PATH}"
+  echo ""
+  echo "Report saved: ${REPORT_PATH}" >&2
+fi
+
+# Exit with error if issues found
+[[ "${ISSUES_FOUND}" -gt 0 ]] && exit 1 || exit 0

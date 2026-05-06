@@ -7,10 +7,19 @@
   hosts: vps
   gather_facts: false
 
+  vars:
+    report_dir_local: "{{ playbook_dir }}/../../reports"
+
   tasks:
     - name: "verify | 1) ssh + python reachable"
       ansible.builtin.raw: "python3 -c 'print(\"pong\")'"
       register: vfy_ssh
+      changed_when: false
+      check_mode: false
+
+    - name: "verify | init | timestamp"
+      ansible.builtin.raw: "date -u +%Y%m%dT%H%M%S"
+      register: verify_ts
       changed_when: false
       check_mode: false
 
@@ -38,6 +47,18 @@
     - name: "verify | set mem fact"
       ansible.builtin.set_fact:
         vfy_mem_mb: "{{ vfy_mem_raw.stdout | trim | int }}"
+
+    - name: "verify | 3b) swap used pct"
+      ansible.builtin.raw: |
+        free -m | awk '/^Swap:/ {t=$2; u=$3; if(t>0) printf "%d",int(u/t*100); else print 0}'
+      register: vfy_swap_raw
+      changed_when: false
+      check_mode: false
+      failed_when: false
+
+    - name: "verify | set swap fact"
+      ansible.builtin.set_fact:
+        vfy_swap_pct: "{{ vfy_swap_raw.stdout | trim | default('0') | int }}"
 
     - name: "verify | mem warn?"
       ansible.builtin.debug:
@@ -86,6 +107,24 @@
       check_mode: false
       failed_when: false
 
+    - name: "verify | 10) container restart counts"
+      ansible.builtin.raw: |
+        docker ps -q 2>/dev/null | xargs docker inspect 2>/dev/null | python3 -c "
+        import json,sys
+        data=json.load(sys.stdin)
+        out=[]
+        for c in data:
+            name=c['Name'].lstrip('/')
+            rc=c.get('RestartCount',0)
+            if rc>0:
+                out.append(f'{name}: RestartCount={rc}')
+        print('\n'.join(out) if out else 'all zero')
+        " 2>/dev/null || echo "n/a"
+      register: vfy_restarts_raw
+      changed_when: false
+      check_mode: false
+      failed_when: false
+
     - name: "verify | display full summary"
       ansible.builtin.debug:
         msg:
@@ -99,6 +138,7 @@
           - "Docker:      {{ vfy_docker_raw.stdout | trim }}"
           - "UFW:         {{ vfy_ufw_raw.stdout | trim | default('n/a') }}"
           - "Journal:     {{ vfy_journal_raw.stdout | trim | default('n/a') }}"
+          - "Restarts:    {{ vfy_restarts_raw.stdout | trim | default('n/a') }}"
           - "------------------------------------------------------------"
           - "Running containers:"
           - "{{ vfy_containers_raw.stdout_lines | default([]) }}"
@@ -106,6 +146,94 @@
           - "App dirs:"
           - "{{ vfy_dirs_raw.stdout_lines | default([]) }}"
           - "============================================================"
+
+    # ---- REPORTS (before fail tasks, so report is always written) ----
+    - name: "verify | compute overall_status"
+      ansible.builtin.set_fact:
+        vfy_overall_status: >-
+          {{ 'fail' if (vfy_disk_pct | int >= (vault_disk_crit_pct | default(90)) | int
+                        or vfy_mem_mb | int < (vault_mem_crit_mb | default(200)) | int
+                        or 'active' not in (vfy_docker_raw.stdout | default('')))
+             else 'warn' if (vfy_disk_pct | int >= (vault_disk_warn_pct | default(80)) | int
+                             or vfy_mem_mb | int < (vault_mem_warn_mb | default(500)) | int
+                             or vfy_swap_pct | int >= 80)
+             else 'ok' }}
+
+    - name: "verify | build health data dict"
+      ansible.builtin.set_fact:
+        vfy_health_data:
+          timestamp: "{{ verify_ts.stdout | trim }}"
+          host: "{{ inventory_hostname }}"
+          overall_status: "{{ vfy_overall_status }}"
+          metrics:
+            disk_pct: "{{ vfy_disk_pct | int }}"
+            mem_available_mb: "{{ vfy_mem_mb | int }}"
+            load_5min: "{{ vfy_load_raw.stdout | trim | float }}"
+            swap_used_pct: "{{ vfy_swap_pct | int }}"
+          running_containers: "{{ vfy_containers_raw.stdout_lines | default([]) }}"
+
+    - name: "verify | ensure health report dir"
+      ansible.builtin.file:
+        path: "{{ report_dir_local }}/health"
+        state: directory
+        mode: "0755"
+      delegate_to: localhost
+      become: false
+      check_mode: false
+
+    - name: "verify | write JSON health report → reports/health/{{ verify_ts.stdout | trim }}.json"
+      ansible.builtin.copy:
+        dest: "{{ report_dir_local }}/health/{{ verify_ts.stdout | trim }}.json"
+        mode: "0644"
+        content: "{{ vfy_health_data | to_nice_json }}\n"
+      delegate_to: localhost
+      become: false
+      check_mode: false
+
+    - name: "verify | write verify-{{ verify_ts.stdout | trim }}.md"
+      ansible.builtin.copy:
+        dest: "{{ report_dir_local }}/verify-{{ verify_ts.stdout | trim }}.md"
+        mode: "0644"
+        content: |
+          # Verify report — {{ inventory_hostname }} — {{ verify_ts.stdout | trim }}
+
+          **Overall:** {{ vfy_overall_status | upper }}
+
+          ## System metrics
+
+          | Check | Value | Status |
+          |---|---|---|
+          | Disk / | {{ vfy_disk_pct }}% used | {{ 'CRIT' if vfy_disk_pct | int >= (vault_disk_crit_pct | default(90)) | int else 'WARN' if vfy_disk_pct | int >= (vault_disk_warn_pct | default(80)) | int else 'OK' }} |
+          | Memory | {{ vfy_mem_mb }}M available | {{ 'CRIT' if vfy_mem_mb | int < (vault_mem_crit_mb | default(200)) | int else 'WARN' if vfy_mem_mb | int < (vault_mem_warn_mb | default(500)) | int else 'OK' }} |
+          | Swap | {{ vfy_swap_pct }}% used | {{ 'WARN' if vfy_swap_pct | int >= 80 else 'OK' }} |
+          | Load 5min | {{ vfy_load_raw.stdout | trim }} | {{ 'CRIT' if vfy_load_raw.stdout | trim | float >= 4.0 else 'WARN' if vfy_load_raw.stdout | trim | float >= 2.0 else 'OK' }} |
+          | Docker | {{ vfy_docker_raw.stdout | trim }} | {{ 'OK' if 'active' in (vfy_docker_raw.stdout | default('')) else 'CRIT' }} |
+          | UFW | {{ vfy_ufw_raw.stdout | trim | default('n/a') }} | {{ 'OK' if 'active' in (vfy_ufw_raw.stdout | default('')) else 'WARN' }} |
+
+          ## Running containers
+
+          ```
+          {{ vfy_containers_raw.stdout | default('(none)') }}
+          ```
+
+          ## App directories
+
+          ```
+          {{ vfy_dirs_raw.stdout | default('(none)') }}
+          ```
+
+          ## Journal disk
+
+          {{ vfy_journal_raw.stdout | trim | default('n/a') }}
+
+          ## Container restart counts
+
+          ```
+          {{ vfy_restarts_raw.stdout | trim | default('n/a') }}
+          ```
+      delegate_to: localhost
+      become: false
+      check_mode: false
 
     - name: "verify | fail if disk critical"
       ansible.builtin.fail:

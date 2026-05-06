@@ -1,0 +1,268 @@
+#!/usr/bin/env python3
+# vps-monitor.py — VPS health monitor
+# Managed by vps_management. Run manually: python3 /usr/local/bin/vps-monitor.py --once
+# Installed at: /usr/local/bin/vps-monitor.py
+
+import sys, os, json, time, subprocess, datetime, argparse, urllib.request, urllib.error
+
+# ---- Configuration (injected by ansible) ----
+TG_BOT_TOKEN = "{{ vault_tg_infra_bot_token | default('') }}"
+TG_CHAT_ID   = "{{ vault_tg_infra_chat_id | default('') }}"
+TG_TOPIC_ID  = "{{ vault_tg_infra_topic_id | default('') }}"
+
+DISK_WARN_PCT = {{ verify_disk_warn_pct | default(80) }}
+DISK_CRIT_PCT = {{ verify_disk_crit_pct | default(90) }}
+MEM_WARN_MB   = {{ vault_mem_warn_mb | default(500) }}
+MEM_CRIT_MB   = {{ vault_mem_crit_mb | default(200) }}
+LOAD_WARN     = {{ loadavg_warn | default(2.0) }}
+LOAD_CRIT     = {{ loadavg_crit | default(4.0) }}
+SWAP_WARN_PCT = 80
+
+EXPECTED_CONTAINERS = [
+{% for c in vault_expected_containers | default([]) %}
+    "{{ c.name }}",
+{% endfor %}
+]
+
+STATE_FILE = "/opt/vps-monitor/state.json"
+LOG_FILE   = "/var/log/vps-monitor.log"
+DEDUP_TTL  = 3600       # seconds — don't repeat same alert within this window
+HEARTBEAT_HOUR_UTC = 6  # 06:00 UTC = 09:00 MSK
+
+# ---- Helpers ----
+def log(msg):
+    ts = datetime.datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S")
+    line = f"[{ts}] {msg}"
+    print(line)
+    try:
+        with open(LOG_FILE, "a") as f:
+            f.write(line + "\n")
+    except Exception:
+        pass
+
+def shell(cmd):
+    try:
+        r = subprocess.run(cmd, shell=True, capture_output=True, text=True, timeout=10)
+        return r.stdout.strip()
+    except Exception as e:
+        return ""
+
+def load_state():
+    try:
+        with open(STATE_FILE) as f:
+            return json.load(f)
+    except Exception:
+        return {}
+
+def save_state(state):
+    try:
+        os.makedirs(os.path.dirname(STATE_FILE), exist_ok=True)
+        with open(STATE_FILE, "w") as f:
+            json.dump(state, f, indent=2)
+    except Exception as e:
+        log(f"WARN: could not save state: {e}")
+
+# ---- Telegram ----
+def send_telegram(text, silent=False):
+    if not TG_BOT_TOKEN or not TG_CHAT_ID:
+        log("TELEGRAM: not configured (vault_tg_infra_bot_token / vault_tg_infra_chat_id missing)")
+        return False
+    payload = {
+        "chat_id": TG_CHAT_ID,
+        "text": text,
+        "parse_mode": "HTML",
+        "disable_notification": silent,
+    }
+    if TG_TOPIC_ID:
+        payload["message_thread_id"] = TG_TOPIC_ID
+    data = json.dumps(payload).encode()
+    url = f"https://api.telegram.org/bot{TG_BOT_TOKEN}/sendMessage"
+    try:
+        req = urllib.request.Request(url, data=data,
+                                      headers={"Content-Type": "application/json"})
+        with urllib.request.urlopen(req, timeout=10) as resp:
+            resp.read()
+        return True
+    except urllib.error.HTTPError as e:
+        log(f"TELEGRAM ERROR: HTTP {e.code} — {e.read().decode()[:200]}")
+    except Exception as e:
+        log(f"TELEGRAM ERROR: {e}")
+    return False
+
+def alert(key, text, level="warn", state=None, force=False):
+    now = int(time.time())
+    if state is not None and not force:
+        last_sent = state.get(f"alert:{key}", 0)
+        if now - last_sent < DEDUP_TTL:
+            log(f"DEDUP skip {key} (last sent {now - last_sent}s ago)")
+            return
+    emoji = "🟡" if level == "warn" else "🔴"
+    silent = (level == "warn")
+    msg = f"{emoji} <b>{level.upper()}</b> | vps-prod\n{text}"
+    log(f"ALERT [{level}] {key}: {text[:80]}")
+    ok = send_telegram(msg, silent=silent)
+    if ok and state is not None:
+        state[f"alert:{key}"] = now
+
+# ---- Metrics collection ----
+def collect():
+    metrics = {}
+
+    # Disk
+    raw = shell("df -BM --output=pcent,used,avail / | tail -1")
+    parts = raw.split()
+    metrics["disk_pct"]     = int(parts[0].rstrip("%")) if parts else 0
+    metrics["disk_used_mb"] = int(parts[1].rstrip("M")) if len(parts) > 1 else 0
+    metrics["disk_avail_mb"]= int(parts[2].rstrip("M")) if len(parts) > 2 else 0
+
+    # Memory
+    mem = shell("free -m | awk '/^Mem:/ {print $7}'")
+    metrics["mem_avail_mb"] = int(mem) if mem.isdigit() else 0
+
+    # Swap
+    swap = shell("free -m | awk '/^Swap:/ {t=$2; u=$3; if(t>0) printf \"%d\",int(u/t*100); else print 0}'")
+    metrics["swap_pct"] = int(swap) if swap.isdigit() else 0
+
+    # Load
+    loadavg = shell("awk '{print $2}' /proc/loadavg")
+    try:
+        metrics["load_5min"] = float(loadavg)
+    except Exception:
+        metrics["load_5min"] = 0.0
+
+    # Docker daemon
+    metrics["docker_active"] = shell("systemctl is-active docker") == "active"
+
+    # Containers
+    running_raw = shell("docker ps --format '{{ '{{' }}.Names{{ '}}' }}' 2>/dev/null")
+    metrics["running_containers"] = [c for c in running_raw.splitlines() if c]
+
+    # Restart counts
+    restarts_raw = shell("""docker ps -q 2>/dev/null | xargs docker inspect 2>/dev/null | python3 -c "
+import json,sys
+data=json.load(sys.stdin)
+for c in data:
+    rc=c.get('RestartCount',0)
+    if rc>0:
+        print(c['Name'].lstrip('/')+':'+str(rc))
+" 2>/dev/null""")
+    metrics["restart_counts"] = {}
+    for line in restarts_raw.splitlines():
+        if ":" in line:
+            name, cnt = line.rsplit(":", 1)
+            try:
+                metrics["restart_counts"][name] = int(cnt)
+            except ValueError:
+                pass
+
+    return metrics
+
+# ---- Health evaluation ----
+def evaluate(metrics):
+    issues = []  # (level, key, text)
+
+    d = metrics["disk_pct"]
+    if d >= DISK_CRIT_PCT:
+        issues.append(("crit", "disk", f"Disk / at {d}% (crit>={DISK_CRIT_PCT}%)"))
+    elif d >= DISK_WARN_PCT:
+        issues.append(("warn", "disk", f"Disk / at {d}% (warn>={DISK_WARN_PCT}%)"))
+
+    m = metrics["mem_avail_mb"]
+    if m < MEM_CRIT_MB:
+        issues.append(("crit", "mem", f"RAM available {m}M (crit<{MEM_CRIT_MB}M)"))
+    elif m < MEM_WARN_MB:
+        issues.append(("warn", "mem", f"RAM available {m}M (warn<{MEM_WARN_MB}M)"))
+
+    s = metrics["swap_pct"]
+    if s >= SWAP_WARN_PCT:
+        issues.append(("warn", "swap", f"Swap {s}% used"))
+
+    l = metrics["load_5min"]
+    if l >= LOAD_CRIT:
+        issues.append(("crit", "load", f"Load5 {l:.2f} (crit>={LOAD_CRIT})"))
+    elif l >= LOAD_WARN:
+        issues.append(("warn", "load", f"Load5 {l:.2f} (warn>={LOAD_WARN})"))
+
+    if not metrics["docker_active"]:
+        issues.append(("crit", "docker", "Docker daemon is NOT active"))
+
+    running = metrics["running_containers"]
+    for expected in EXPECTED_CONTAINERS:
+        if expected not in running:
+            issues.append(("crit", f"container:{expected}", f"Container {expected} NOT running"))
+
+    for name, cnt in metrics.get("restart_counts", {}).items():
+        if cnt >= 10:
+            issues.append(("crit", f"restarts:{name}", f"{name} RestartCount={cnt}"))
+        elif cnt >= 3:
+            issues.append(("warn", f"restarts:{name}", f"{name} RestartCount={cnt}"))
+
+    return issues
+
+# ---- Heartbeat ----
+def maybe_send_heartbeat(metrics, state):
+    now = datetime.datetime.utcnow()
+    today_key = f"heartbeat:{now.strftime('%Y-%m-%d')}"
+    if now.hour != HEARTBEAT_HOUR_UTC:
+        return
+    if state.get(today_key):
+        return
+    running_cnt = len(metrics["running_containers"])
+    expected_cnt = len(EXPECTED_CONTAINERS)
+    text = (
+        f"✅ <b>vps-prod alive</b>\n"
+        f"disk: {metrics['disk_pct']}%  "
+        f"mem: {metrics['mem_avail_mb']}M avail  "
+        f"load: {metrics['load_5min']:.2f}\n"
+        f"containers: {running_cnt}/{expected_cnt} running"
+    )
+    ok = send_telegram(text, silent=True)
+    if ok:
+        state[today_key] = True
+        log("Heartbeat sent")
+
+# ---- Main ----
+def run_once(test_alert=False):
+    if test_alert:
+        log("Sending test alert to Telegram...")
+        ok = send_telegram("🧪 <b>TEST</b> | vps-monitor test alert from vps-prod", silent=True)
+        log("OK" if ok else "FAILED (check TG tokens in vault)")
+        return 0
+
+    log("=== Health check START ===")
+    metrics = collect()
+
+    log(f"disk={metrics['disk_pct']}%  mem={metrics['mem_avail_mb']}M  "
+        f"swap={metrics['swap_pct']}%  load={metrics['load_5min']:.2f}  "
+        f"docker={'active' if metrics['docker_active'] else 'INACTIVE'}  "
+        f"containers={len(metrics['running_containers'])}/{len(EXPECTED_CONTAINERS)}")
+
+    issues = evaluate(metrics)
+
+    state = load_state()
+    exit_code = 0
+
+    if issues:
+        log(f"Issues found: {len(issues)}")
+        for level, key, text in issues:
+            log(f"  [{level.upper()}] {text}")
+            alert(key, text, level=level, state=state)
+            if level == "crit":
+                exit_code = 2
+            elif exit_code == 0:
+                exit_code = 1
+    else:
+        log("All checks OK")
+
+    maybe_send_heartbeat(metrics, state)
+    save_state(state)
+    log("=== Health check END ===")
+    return exit_code
+
+if __name__ == "__main__":
+    parser = argparse.ArgumentParser(description="vps-monitor — VPS health check")
+    parser.add_argument("--once",       action="store_true", help="Run one check and exit")
+    parser.add_argument("--test-alert", action="store_true", help="Send test Telegram message and exit")
+    args = parser.parse_args()
+
+    sys.exit(run_once(test_alert=args.test_alert))

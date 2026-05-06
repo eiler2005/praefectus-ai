@@ -15,6 +15,7 @@
   gather_facts: false
 
   vars:
+    report_dir_local:     "{{ playbook_dir }}/../../reports"
     docker_container_age: "{{ vault_docker_container_age | default('72h') }}"
     docker_image_age:     "{{ vault_docker_image_age     | default('168h') }}"
     docker_builder_age:   "{{ vault_docker_builder_age   | default('168h') }}"
@@ -38,6 +39,12 @@
     - name: "10 | audit | display disk before"
       ansible.builtin.debug:
         msg: "Disk before: {{ disk_used_pct_before }}% ({{ disk_used_mb_before }}M used)"
+
+    - name: "10 | init | capture UTC timestamp for report"
+      ansible.builtin.raw: "date -u +%Y%m%dT%H%M%S"
+      register: cleanup_ts
+      changed_when: false
+      check_mode: false
 
     - name: "10 | safety | stop if disk >= {{ disk_crit_pct }}%"
       ansible.builtin.fail:
@@ -212,3 +219,40 @@
           - "Next: ansible-playbook playbooks/99-verify.yml"
           - "      — confirm all services still running."
           - "========================================="
+
+    # ---- REPORT (written locally on Mac) ----
+    - name: "10 | report | write cleanup-{{ cleanup_ts.stdout | trim }}.md"
+      ansible.builtin.copy:
+        dest: "{{ report_dir_local }}/cleanup-{{ cleanup_ts.stdout | trim }}.md"
+        mode: "0644"
+        content: |
+          # Cleanup report — {{ inventory_hostname }} — {{ cleanup_ts.stdout | trim }}
+
+          ## Disk
+          | | Value |
+          |---|---|
+          | Before | {{ disk_used_pct_before }}% ({{ disk_used_mb_before }}M used) |
+          | After  | {{ disk_used_pct_after }}% ({{ disk_used_mb_after }}M used) |
+          | Freed  | {{ (disk_used_mb_before | int) - (disk_used_mb_after | int) }}M |
+
+          ## APT
+          - apt clean: {{ (apt_clean.changed | default(false)) | ternary('changed', 'no change') }}
+          - apt autoremove: {{ (apt_autoremove.changed | default(false)) | ternary('changed', 'no change') }}
+
+          ## Journal vacuum
+          - Time ({{ journal_keep_time }}): {{ journal_vac_time.stdout_lines | default(['n/a']) | last }}
+          - Size ({{ journal_max_size }}): {{ journal_vac_size.stdout_lines | default(['n/a']) | last }}
+
+          ## Docker prune
+          - Container (until={{ docker_container_age }}): {{ docker_cont_prune.stdout_lines | default(['(check mode)']) | last }}
+          - Image     (until={{ docker_image_age }}): {{ docker_img_prune.stdout_lines | default(['(check mode)']) | last }}
+          - Builder:  {{ docker_build_prune.stdout_lines | default(['(check mode)']) | last }}
+          - Dangling volumes: {{ docker_dangling_vols.stdout_lines | length }} (NEVER auto-pruned)
+
+          ## Docker disk (after)
+          ```
+          {{ docker_df_after.stdout | default('n/a') }}
+          ```
+      delegate_to: localhost
+      become: false
+      check_mode: false
