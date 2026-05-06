@@ -33,6 +33,9 @@
 | `/opt/wiki-import/` | [openclaw_firststeps](../../openclaw_firststeps/) | wiki import :8095 | `scripts/deploy-wiki-import.sh` | mem_limit |
 | `/opt/agentmail-email/`, `/opt/agentmail-work-email/` | [openclaw_firststeps](../../openclaw_firststeps/) | mail bots | свои deploy скрипты | mem_limit |
 | `/opt/obsidian-vault/` | vps_management (Syncthing host) | синхронизируется с Mac (двусторонне!) | Syncthing | Да |
+| `/opt/stealth/` | router_configuration | конфиг stealth-routing (Xray side) | router_configuration ansible | **Нет** |
+| `/opt/ghostroute-health-monitor/` | router_configuration | live-check / deploy-risk скрипты | router_configuration ansible | **Нет** |
+| `/opt/ghostroute/backups/` | router_configuration | last-good бэкапы VPS-edge (caddy, ufw, stealth) | router_configuration `vps-last-good-backup.yml` | **Нет** |
 
 ## Что значит "владелец"
 
