@@ -2,7 +2,7 @@
 
 Каноническая таблица всех сетевых портов на VPS. Обновлять при добавлении/удалении сервисов.
 
-**Последний аудит:** 2026-05-03  
+**Последний аудит:** 2026-05-06  
 **Инструмент проверки:** `./modules/port-audit/bin/port-audit`
 
 ---
@@ -16,6 +16,15 @@
 | 443 | TCP | Caddy HTTPS | system (caddy) | router_configuration | TLS handshake |
 | 443 | TCP | Xray Reality (multiplexed на 443) | xray (host net) | router_configuration | TLS handshake |
 | 22000 | TCP | Syncthing sync | system (syncthing) | vps_management | TCP connect |
+| 22000 | UDP | Syncthing sync (QUIC) | system (syncthing) | vps_management | UDP connect |
+| 21027 | UDP | Syncthing discovery | system (syncthing) | vps_management | UDP connect |
+| 2087 | TCP | GhostRoute Console HTTPS (Caddy) | system (caddy) | router_configuration | `GET /api/health` |
+
+## Ограниченные порты (только из определённых сетей)
+
+| Порт | Протокол | Сервис | Источник | Владелец | Примечание |
+|---|---|---|---|---|---|
+| 15353 | TCP+UDP | Unbound (DNS resolver) | 172.22.0.0/16 (Xray Docker bridge) | router_configuration | **Опционально** с 2026-05-06: основной DNS перемещён на dnscrypt-proxy на роутере; UFW правило остаётся для диагностики |
 
 ## Приватные порты (127.0.0.1 — внутренние)
 
@@ -60,7 +69,7 @@
 - 3000, 8020–8095, 8384, 18789–18790, 20128–20129
 - Если `ss -tlnp` показывает 0.0.0.0 для этих портов → немедленный инцидент
 
-**Исключения (публичные по назначению):** 22, 80, 443, 22000
+**Исключения (публичные по назначению):** 22, 80, 443, 2087, 21027, 22000
 
 ---
 
