@@ -64,6 +64,65 @@ ansible-playbook playbooks/10-disk-cleanup.yml
    ```
    При острой нужде: `docker buildx prune -af` (без фильтра — но это **только** build cache, не runtime).
 
+## App-owned cleanup candidates
+
+Эти пути не принадлежат `vps_management`. Удалять только после явного owner/operator approval, но полезно знать что безопасно считать reclaim-кандидатом.
+
+### `router_configuration` / `ghostroute-console`
+
+Источник: `router_configuration/modules/ghostroute-console/`.
+
+Можно удалять после approval:
+- `/opt/ghostroute-console/data/backups/ghostroute-*.db` — daily SQLite safety backups. Код создаёт их из live DB и сам должен ограничивать retention через `GHOSTROUTE_BACKUP_RETENTION_DAYS=2` и `GHOSTROUTE_DB_BACKUP_MAX_FILES=2`.
+- Старые неактивные Docker rollback/git-tag images `ghostroute-console:*`, если image ID не используется running container. Оставь active image, `latest`, и минимум один самый свежий rollback.
+
+Не удалять:
+- `/opt/ghostroute-console/data/ghostroute.db` — live SQLite DB.
+- `/opt/ghostroute-console/data/snapshots/` без owner review — это runtime evidence; сначала проверь retention/collector.
+- `/opt/ghostroute-console/{auth,ssh,router-ssh,repo}` — runtime/deploy assets.
+
+Проверки перед удалением backups:
+```bash
+ssh deploy@<vps> 'df -h /'
+ssh deploy@<vps> 'sudo ls -lh /opt/ghostroute-console/data/backups'
+ssh deploy@<vps> 'docker ps --format "{{.Names}} {{.Status}}" | grep ghostroute-console'
+```
+
+Удаление approved DB backups:
+```bash
+ssh deploy@<vps> 'sudo sh -c "rm -vf /opt/ghostroute-console/data/backups/ghostroute-*.db"'
+./verify.sh
+```
+
+Если backups снова быстро растут, это bug/drift в `router_configuration`: проверить retention env в `/opt/ghostroute-console` compose/deploy и последний `retention_runs` в DB.
+
+### `openclaw_firststeps` / LightRAG and OpenClaw
+
+Источник: `openclaw_firststeps/scripts/setup-llm-wiki.sh` и operational docs.
+
+Можно удалять после approval:
+- `/opt/lightrag/backups/llm-wiki-*` — setup/import rollback snapshots.
+- `/opt/lightrag/data-backups/*pre-knowledgebackfill-reset*` — one-off pre-reset snapshots.
+- `/opt/openclaw-backup-*` — old gateway upgrade rollback dirs, если соответствующий upgrade давно принят.
+
+Не удалять:
+- `/opt/lightrag/data/rag_storage/` — live LightRAG graph/vector store.
+- `/opt/lightrag/data/inputs/` — source/input queue unless owner confirms.
+- `/opt/openclaw/config/memory/main.sqlite` — live OpenClaw memory/state DB.
+- `/opt/openclaw/workspace/` — durable workspace.
+
+Проверка кандидатов:
+```bash
+ssh deploy@<vps> 'sudo du -xhd2 /opt/lightrag /opt/openclaw 2>/dev/null | sort -hr | head -60'
+ssh deploy@<vps> 'sudo find /opt/lightrag /opt/openclaw -xdev \( -path "*/backups/*" -o -path "*/data-backups/*" -o -name "*backup*" \) -printf "%s %TY-%Tm-%Td %p\n" 2>/dev/null | sort -nr | head -60'
+```
+
+Удаление approved LightRAG/OpenClaw snapshots:
+```bash
+ssh deploy@<vps> 'sudo rm -rfv /opt/lightrag/backups/llm-wiki-* /opt/lightrag/data-backups/*pre-knowledgebackfill-reset* /opt/openclaw-backup-*'
+./verify.sh
+```
+
 ## Шаг 3 — если >90% и нужно срочно
 
 Не паникуй, ничего не удаляй "наобум". Применяй по порядку:
