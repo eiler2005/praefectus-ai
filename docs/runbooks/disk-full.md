@@ -17,9 +17,10 @@
 ```
 
 Прочитай отчёт. Обрати внимание на:
-- `du -sh /var/log` — много логов?
-- `du -sh /var/lib/docker` — много images/build cache?
-- `du -sh /opt/lightrag/data` — KG распух?
+- `sudo du -xhd1 / /var /opt /home /root` — реальные размеры, включая protected dirs.
+- `/var/lib/docker` и `/var/lib/containerd` — много images/build cache?
+- `/opt/lightrag/data` — KG распух?
+- `/opt/ghostroute-console/data/backups` — app-owned DB backups; только owner review.
 - Top large files — есть аномалии?
 - Dangling volumes — есть orphaned state?
 
@@ -35,17 +36,22 @@ ansible-playbook playbooks/10-disk-cleanup.yml
 
 Это типично освобождает 1-5GB на работающем сервере (apt cache + journal vacuum + docker image prune старше 7 дней).
 
-Если `verify.sh` зелёный после — закончили.
+Если `verify.sh` зелёный и диск <80% после — закончили.
+Если `verify.sh` зелёный, но диск всё ещё ≥80% — это уже не emergency, но нужен owner review по application data.
 
 ## Шаг 2 — если мало освободилось (<500MB)
 
 Возможные причины:
 1. **Application data** в `/opt/<app>/{data,workspace}` — это не наша зона, обращайся к владельцу проекта (см. `ownership-matrix.md`).
-2. **Recent docker images** — `--filter until=168h` не их захватил. Проверь:
+2. **Recent docker images** — `--filter until=168h` не их захватил. Проверь активные image ID и свежие rollback tags:
    ```bash
-   ssh deploy@<vps> 'docker images --format "{{.Repository}}:{{.Tag}} {{.CreatedAt}} {{.Size}}" | sort -k2'
+   ssh deploy@<vps> 'docker ps -q | xargs -r docker inspect --format "{{.Name}} {{.Config.Image}} {{.Image}}"'
+   ssh deploy@<vps> 'docker images --format "{{.ID}} {{.CreatedAt}} {{.Size}} {{.Repository}}:{{.Tag}}" | sort -k2r'
    ```
-   Если есть огромный образ (>1GB) от tooling/CI который точно не нужен — удали вручную: `docker rmi <id>`.
+   Если есть fresh rollback images, которых не забрал age-filter:
+   - Не удаляй image ID, который используется running container.
+   - Для `ghostroute-console` оставь активный image ID, `latest`, и минимум один самый свежий unused rollback.
+   - Остальные unused rollback/git-tag images можно удалять через `docker rmi <tag-or-id>`.
 3. **Dangling volumes** — manual review. Список вывел `disk-report`. Для каждого:
    ```bash
    ssh deploy@<vps> 'docker volume inspect <name>'
@@ -62,24 +68,40 @@ ansible-playbook playbooks/10-disk-cleanup.yml
 
 Не паникуй, ничего не удаляй "наобум". Применяй по порядку:
 
-1. **Журналы вручную:**
+1. **Снимок состояния:**
+   ```bash
+   ssh deploy@<vps> 'df -h /; df -ih /; sudo du -xhd1 / /var /opt /home /root 2>/dev/null | sort -hr | head -50'
+   ```
+2. **Журналы вручную:**
    ```bash
    ssh deploy@<vps> 'sudo journalctl --vacuum-size=100M'
    ```
-2. **Старые kernel пакеты:**
+3. **Старые kernel пакеты:**
    ```bash
    ssh deploy@<vps> 'sudo apt-get autoremove --purge -y'
    ```
-3. **Большие лог-файлы конкретных сервисов:**
+4. **Большие лог-файлы конкретных сервисов:**
    ```bash
    ssh deploy@<vps> 'sudo find /var/log -type f -size +100M -exec ls -lh {} \;'
    # Для каждого: truncate -s 0 <path> (если знаешь что делаешь)
    ```
-4. **Docker — снять running stale контейнеры:**
+5. **Docker — безопасный host-side prune:**
    ```bash
    ssh deploy@<vps> 'docker ps -a --filter "status=exited" --format "{{.ID}} {{.Names}} {{.Status}}"'
-   # Для совсем старых: docker rm <id>
+   ssh deploy@<vps> 'docker container prune -f --filter "until=72h"'
+   ssh deploy@<vps> 'docker image prune -af --filter "until=168h"'
+   ssh deploy@<vps> 'docker builder prune -af --filter "until=168h"'
    ```
+   Volumes не prune автоматически.
+
+После ручного emergency-pass обязательно вернись к стандартной процедуре:
+
+```bash
+cd ansible
+ansible-playbook playbooks/10-disk-cleanup.yml --check --diff
+ansible-playbook playbooks/10-disk-cleanup.yml
+./verify.sh
+```
 
 ## Шаг 4 — если >95% и сервисы падают
 
@@ -101,6 +123,7 @@ ansible-playbook playbooks/10-disk-cleanup.yml
 
 После того как вылечили — найди причину:
 - Почему `/opt/lightrag/data` вырос? — owner: openclaw_firststeps. Может быть pruning issue или KG переиндексировался.
+- Почему `/opt/ghostroute-console/data/backups` вырос? — owner: router_configuration. vps_management только фиксирует размер и reclaim potential.
 - Почему так много docker images? — owner проекта много раз rebuild без `--rm` или CI без cleanup.
 - Почему journal распух? — какой-то сервис спамит ошибками.
 
@@ -108,6 +131,8 @@ ansible-playbook playbooks/10-disk-cleanup.yml
 
 ## Превентивно
 
-- `10-disk-cleanup.yml` запускать раз в неделю по cron / `loop`-skill.
+- Canonical weekly cleanup timer: `vps-cleanup.timer`, управляется `ansible/playbooks/11-periodic-cleanup-setup.yml`.
+- Legacy `vps-weekly-cleanup.timer` должен быть disabled/removed; не включай два cleanup timer одновременно.
+- `10-disk-cleanup.yml` запускать вручную при WARN/CRIT после `--check --diff`.
 - `verify.sh` — раз в час (warn @80% даёт неделю на реакцию).
 - При появлении `30-backup.yml` — следить за тем, чтобы локальный restic-кэш на VPS не разрастался (он на VPS не нужен, restic пишет напрямую в repo).

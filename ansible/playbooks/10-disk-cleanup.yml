@@ -5,6 +5,7 @@
 #   - journalctl vacuum (14d / 500M)
 #   - docker container/image/builder prune --filter until=Nh
 #   - logrotate config
+#   - volumes NEVER touched
 #
 # Workflow:
 #   ansible-playbook playbooks/10-disk-cleanup.yml --check   (dry-run — показывает план)
@@ -56,7 +57,7 @@
 
     - name: "10 | audit | top dirs"
       ansible.builtin.raw: |
-        du -sh /var/log /var/lib/docker /var/cache /opt/* 2>/dev/null | sort -hr | head -20
+        sudo du -xhd1 / /var /opt /home /root 2>/dev/null | sort -hr | head -50
       register: top_dirs
       changed_when: false
       check_mode: false
@@ -67,6 +68,27 @@
       changed_when: false
       check_mode: false
 
+    - name: "10 | audit | docker active images"
+      ansible.builtin.raw: !unsafe |
+        docker ps -q 2>/dev/null \
+          | xargs -r docker inspect --format '{{.Name}} {{.Config.Image}} {{.Image}}' 2>/dev/null \
+          | sed 's#^/##' \
+          || echo 'docker n/a'
+      register: docker_active_images
+      changed_when: false
+      check_mode: false
+
+    - name: "10 | audit | recent docker rollback images"
+      ansible.builtin.raw: !unsafe |
+        docker images --format '{{.ID}} {{.CreatedAt}} {{.Size}} {{.Repository}}:{{.Tag}}' 2>/dev/null \
+          | awk '$0 ~ /ghostroute-console:(rollback-|[0-9a-f]{7,})/ {print}' \
+          | sort -k2r \
+          | head -30 \
+          || echo 'docker n/a'
+      register: docker_recent_rollbacks
+      changed_when: false
+      check_mode: false
+
     - name: "10 | audit | display top dirs + docker"
       ansible.builtin.debug:
         msg:
@@ -74,6 +96,10 @@
           - "{{ top_dirs.stdout_lines }}"
           - "Docker disk:"
           - "{{ docker_df_before.stdout_lines }}"
+          - "Docker active images:"
+          - "{{ docker_active_images.stdout_lines }}"
+          - "Recent rollback/git-tag images skipped by age filters unless old enough:"
+          - "{{ docker_recent_rollbacks.stdout_lines }}"
 
     # ---- APT ----
     - name: "10 | apt | clean"
@@ -124,9 +150,9 @@
       changed_when: "'Total reclaimed space' in docker_img_prune.stdout and '0B' not in docker_img_prune.stdout"
       tags: [docker]
 
-    - name: "10 | docker | builder prune (no age filter — build cache is always safe to clear)"
+    - name: "10 | docker | builder prune (until={{ docker_builder_age }})"
       ansible.builtin.raw: |
-        docker builder prune -af 2>&1 | tail -2
+        docker builder prune -af --filter "until={{ docker_builder_age }}" 2>&1 | tail -2
       register: docker_build_prune
       changed_when: true
       tags: [docker]

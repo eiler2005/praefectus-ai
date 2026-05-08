@@ -25,8 +25,8 @@
 | # | Файл | Назначение | Mutating? |
 |---|---|---|---|
 | 10 | `10-disk-cleanup.yml` | Однократная чистка: apt clean, journal vacuum (14d/500M), docker prune (с `--filter until=Nh`), logrotate config. Volumes не трогаем. | yes |
-| 11a | `11-periodic-cleanup-setup.yml` | Устанавливает `/usr/local/bin/vps-periodic-cleanup.sh` + systemd timer (вс 03:00 UTC). Те же фильтры что в `10-*`. | yes (one-shot setup) |
-| 11b | `11-schedule-cleanup.yml` | Альтернативный вариант: устанавливает таймер еженедельной чистки (вс 03:00 UTC), лог `/var/log/vps-weekly-cleanup.log`. | yes (one-shot setup) |
+| 11 | `11-periodic-cleanup-setup.yml` | Устанавливает canonical `vps-cleanup.timer` + `/usr/local/bin/vps-periodic-cleanup.sh` (вс 03:00 UTC), retires legacy `vps-weekly-cleanup.timer`. | yes (one-shot setup) |
+| 11 deprecated | `11-schedule-cleanup.yml` | Guardrail only: intentionally fails and points to `11-periodic-cleanup-setup.yml`. | no |
 | 20 | `20-monitoring.yml` | Деплоит Python-poller `/usr/local/bin/vps-monitor.py` + systemd timer (5 мин). Алертит в Telegram при WARN/CRIT. | yes |
 | 30 | `30-backup.yml` | restic + B2: бэкап `/opt/maxtg-bridge/data`, `/opt/openclaw/workspace`, `/opt/obsidian-vault/wiki`. Systemd timer ежедневно 02:00 UTC. Теги: `--tags run` (разовый запуск), `--tags status` (снимки + таймер). | yes (one-shot setup) |
 | 40 | `40-security.yml` | fail2ban (sshd jail), unattended-upgrades (только -security), sshd MaxSessions enforcement, UFW audit. | yes |
@@ -47,7 +47,7 @@
 | [`modules/dashboard/bin/update-dashboard`](../modules/dashboard/bin/update-dashboard) | Читает свежий `reports/health/*.json` + `reports/cleanup-*.md` + `reports/syncthing-audit-*.md`, генерит `docs/dashboard.md`. | Когда нужна актуальная картина без логина в VPS |
 | [`modules/disk-observatory/bin/disk-report`](../modules/disk-observatory/bin/disk-report) | Standalone (без ansible) SSH в VPS, собирает df/du/docker df, печатает + сохраняет в `reports/`. | Быстрый disk-audit без playbook |
 | [`modules/health-trends/bin/health-trend`](../modules/health-trends/bin/health-trend) | Анализ N последних `reports/health/*.json`: тренд диска/swap/памяти, нестабильные контейнеры. Флаги: `--last N`, `--trend disk`. | Когда хочется видеть динамику, а не точечный снимок |
-| [`modules/maintenance-journal/bin/cleanup-fetch`](../modules/maintenance-journal/bin/cleanup-fetch) | SSH в VPS, тянет `/var/log/vps-weekly-cleanup.log`, агрегирует по неделям в `reports/maintenance/<YYYY-MM>.md`. Флаги: `--all`, `--stdout`. | Раз в месяц — посмотреть что чистил автотаймер |
+| [`modules/maintenance-journal/bin/cleanup-fetch`](../modules/maintenance-journal/bin/cleanup-fetch) | SSH в VPS, тянет `/var/log/vps-periodic-cleanup.log` (fallback: legacy weekly log), агрегирует по неделям в `reports/maintenance/<YYYY-MM>.md`. Флаги: `--all`, `--stdout`. | Раз в месяц — посмотреть что чистил автотаймер |
 | [`modules/monitoring/bin/run-check`](../modules/monitoring/bin/run-check) | Запускает `vps-monitor.py --once` на VPS. Флаги: `--test-alert` (тест Telegram), `--log` (показать `/var/log/vps-monitor.log`), `--status` (systemd timer). | Ручная проверка вне 5-мин таймера |
 | [`modules/port-audit/bin/port-audit`](../modules/port-audit/bin/port-audit) | Сравнивает реальные listeners (`ss -tlnp`) с `docs/ports.md`. Ловит новые порты, пропавшие, небезопасные `0.0.0.0`-bindings. Флаги: `--save`, `--live-only`. | После добавления нового сервиса; ежемесячный security audit |
 | [`modules/secrets-management/bin/secret-scan`](../modules/secrets-management/bin/secret-scan) | Grep по всему репо: реальный VPS IP, публичные IPv4 (кроме TEST-NET), SSH private keys, hardcoded `api_key=`/`token=`. Игнорит vault.yml и reports/. | **Перед каждым commit** |

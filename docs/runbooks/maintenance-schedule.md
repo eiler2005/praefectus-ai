@@ -6,10 +6,12 @@
 
 ## Еженедельно — автоматически (systemd timer)
 
-**Таймер:** `vps-weekly-cleanup.timer` (Sun 03:00 UTC)  
-**Скрипт:** `/usr/local/bin/vps-weekly-cleanup.sh`  
-**Лог:** `/var/log/vps-weekly-cleanup.log`  
-**Установить/обновить:** `ansible-playbook playbooks/11-schedule-cleanup.yml`
+**Таймер:** `vps-cleanup.timer` (Sun 03:00 UTC)
+**Скрипт:** `/usr/local/bin/vps-periodic-cleanup.sh`
+**Лог:** `/var/log/vps-periodic-cleanup.log`
+**Установить/обновить:** `ansible-playbook playbooks/11-periodic-cleanup-setup.yml`
+
+Legacy `vps-weekly-cleanup.timer` должен быть disabled/removed. Не включай два weekly cleanup timer одновременно.
 
 | Операция | Команда | Безопасность |
 |---|---|---|
@@ -61,7 +63,7 @@ ansible-playbook playbooks/10-disk-cleanup.yml          # apply
 | Задача | Команда | Примечание |
 |---|---|---|
 | Dangling volumes review | `ssh deploy@<vps> 'docker volume ls -f dangling=true'` | Инспектировать каждый; удалять только осиротевшие |
-| `/opt/*` размеры | `ssh deploy@<vps> 'du -sh /opt/* \| sort -hr'` | Если аномальный рост — разбираться с владельцем |
+| `/opt/*` размеры | `ssh deploy@<vps> 'sudo du -xhd1 /opt \| sort -hr'` | Если аномальный рост — разбираться с владельцем |
 | lightrag/data audit | `ssh deploy@<vps> 'du -sh /opt/lightrag/data'` | При >5GB — обсудить переиндексацию |
 | Syncthing conflicts | `ssh deploy@<vps> 'find /opt/obsidian-vault -name "*.sync-conflict-*" \| head -20'` | Разрешить вручную |
 | SSH authorized_keys | `ssh deploy@<vps> 'cat ~/.ssh/authorized_keys'` | Подтвердить что нет лишних ключей |
@@ -99,4 +101,4 @@ ansible-playbook playbooks/10-disk-cleanup.yml          # apply
 | Отчёты ручной чистки | `reports/cleanup-<ts>.md` (gitignored) |
 | Агрегированные weekly logs | `reports/maintenance/YYYY-MM.md` (gitignored) |
 | Журнал ручных изменений | `docs/journal/YYYY-MM.md` (в git) |
-| Weekly cleanup лог на VPS | `/var/log/vps-weekly-cleanup.log` |
+| Weekly cleanup лог на VPS | `/var/log/vps-periodic-cleanup.log` |

@@ -22,13 +22,16 @@ Standalone отчёт по состоянию диска VPS. Используе
 
 Через одну SSH-сессию:
 - `df -h /` — общая занятость
+- `df -ih /` — inode usage
 - `free -h` — память
 - `/proc/loadavg` — нагрузка
-- `du -sh` для `/var/log`, `/var/lib/docker`, `/var/cache`, `/opt/*`, `/home/*` (top 20)
+- `sudo du -xhd1` для `/`, `/var`, `/opt`, `/home`, `/root` (top 50)
 - `docker system df` — детальная docker-разбивка
+- active Docker image IDs и recent rollback/git-tag images
 - `journalctl --disk-usage` — место под журналом
 - Размер apt cache
 - Top-50 файлов >100M
+- App-owned review candidates, например `/opt/ghostroute-console/data/backups`
 - Dangling docker volumes (для manual review)
 
 ## Зависимости

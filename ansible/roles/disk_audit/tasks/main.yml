@@ -18,7 +18,7 @@
 - name: "audit | top {{ audit_top_dirs }} directories by size in monitored paths"
   ansible.builtin.shell: |
     set -o pipefail
-    du -sh {{ audit_paths | join(' ') }} 2>/dev/null \
+    sudo du -xhd1 / /var /opt /home /root 2>/dev/null \
       | sort -hr \
       | head -n {{ audit_top_dirs }}
   args:
@@ -31,7 +31,8 @@
 - name: "audit | top {{ audit_top_files }} files larger than {{ audit_min_file_size_mb }}M"
   ansible.builtin.shell: |
     set -o pipefail
-    find / -xdev -type f -size +{{ audit_min_file_size_mb }}M 2>/dev/null \
+    sudo find / -xdev -type f -size +{{ audit_min_file_size_mb }}M -printf '%s %p\n' 2>/dev/null \
+      | sort -nr \
       | head -n {{ audit_top_files }}
   args:
     executable: /bin/bash
@@ -46,6 +47,33 @@
   changed_when: false
   check_mode: false
   failed_when: false  # docker может быть не установлен (свежая VM)
+
+- name: "audit | docker active images"
+  ansible.builtin.shell: |
+    set -o pipefail
+    docker ps -q 2>/dev/null \
+      | xargs -r docker inspect --format '{% raw %}{{.Name}} {{.Config.Image}} {{.Image}}{% endraw %}' 2>/dev/null \
+      | sed 's#^/##'
+  args:
+    executable: /bin/bash
+  register: audit_docker_active_images
+  changed_when: false
+  check_mode: false
+  failed_when: false
+
+- name: "audit | docker rollback images"
+  ansible.builtin.shell: |
+    set -o pipefail
+    docker images --format '{% raw %}{{.ID}} {{.CreatedAt}} {{.Size}} {{.Repository}}:{{.Tag}}{% endraw %}' 2>/dev/null \
+      | awk '$0 ~ /ghostroute-console:(rollback-|[0-9a-f]{7,})/ {print}' \
+      | sort -k2r \
+      | head -30
+  args:
+    executable: /bin/bash
+  register: audit_docker_rollback_images
+  changed_when: false
+  check_mode: false
+  failed_when: false
 
 - name: "audit | journal disk usage"
   ansible.builtin.command: journalctl --disk-usage
@@ -75,6 +103,10 @@
       - "{{ audit_top_du.stdout_lines | default([]) }}"
       - "--- Docker disk ---"
       - "{{ audit_docker_df.stdout_lines | default(['docker not installed']) }}"
+      - "--- Docker active images ---"
+      - "{{ audit_docker_active_images.stdout_lines | default([]) }}"
+      - "--- Docker rollback/git-tag images ---"
+      - "{{ audit_docker_rollback_images.stdout_lines | default([]) }}"
       - "--- Large files (>{{ audit_min_file_size_mb }}M) ---"
       - "{{ audit_large_files.stdout_lines | default([]) }}"
 
@@ -97,6 +129,16 @@
       ## Docker disk usage
       ```
       {{ audit_docker_df.stdout | default('docker not installed') }}
+      ```
+
+      ## Docker active images
+      ```
+      {{ audit_docker_active_images.stdout | default('') }}
+      ```
+
+      ## Docker rollback/git-tag images
+      ```
+      {{ audit_docker_rollback_images.stdout | default('') }}
       ```
 
       ## Large files (>{{ audit_min_file_size_mb }}M)

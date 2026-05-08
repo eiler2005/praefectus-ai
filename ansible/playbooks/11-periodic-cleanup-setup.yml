@@ -15,6 +15,9 @@
 # После установки проверить:
 #   ssh deploy@<vps> systemctl status vps-cleanup.timer
 #   ssh deploy@<vps> systemctl list-timers vps-cleanup.timer
+# Legacy note:
+#   vps-weekly-cleanup.timer was an older duplicate timer. This playbook
+#   disables/removes it so only vps-cleanup.timer remains canonical.
 
 - name: "11 | Periodic cleanup setup — install weekly cleanup timer"
   hosts: vps
@@ -28,6 +31,7 @@
     journal_max_size:     "{{ vault_journal_max_size     | default('500M') }}"
     cleanup_script_path: /usr/local/bin/vps-periodic-cleanup.sh
     cleanup_log_path:    /var/log/vps-periodic-cleanup.log
+    legacy_cleanup_script_path: /usr/local/bin/vps-weekly-cleanup.sh
 
   tasks:
     # ---- SCRIPT ----
@@ -138,6 +142,30 @@
       changed_when: "'CHANGED' in timer_enable.stdout"
       tags: [systemd]
 
+    - name: "11 | legacy | retire vps-weekly-cleanup duplicate timer"
+      ansible.builtin.raw: |
+        changed=0
+        if systemctl list-unit-files vps-weekly-cleanup.timer --no-legend 2>/dev/null | grep -q . \
+           || systemctl is-active --quiet vps-weekly-cleanup.timer 2>/dev/null; then
+          sudo systemctl disable --now vps-weekly-cleanup.timer 2>/dev/null || true
+          changed=1
+        fi
+        for path in \
+          {{ legacy_cleanup_script_path }} \
+          /etc/systemd/system/vps-weekly-cleanup.service \
+          /etc/systemd/system/vps-weekly-cleanup.timer
+        do
+          if [ -e "$path" ]; then
+            sudo rm -f "$path"
+            changed=1
+          fi
+        done
+        sudo systemctl daemon-reload
+        if [ "$changed" -eq 1 ]; then echo CHANGED; else echo OK; fi
+      register: legacy_cleanup_retire
+      changed_when: "'CHANGED' in legacy_cleanup_retire.stdout"
+      tags: [systemd]
+
     # ---- LOGROTATE FOR CLEANUP LOG ----
     - name: "11 | logrotate | cleanup log rotation"
       ansible.builtin.raw: |
@@ -179,6 +207,7 @@
           - "Script:       {{ cleanup_script_path }}"
           - "Log:          {{ cleanup_log_path }}"
           - "Timer:        vps-cleanup.timer"
+          - "Legacy timer: {{ 'retired' if legacy_cleanup_retire.changed else 'absent' }}"
           - "Schedule:     Sun 03:00 UTC (weekly)"
           - "Timer status: {{ timer_status.stdout | trim }}"
           - ""

@@ -1,6 +1,6 @@
 ---
-# Inventory production. Connection params — прямые значения (vault не разворачивается здесь в ansible 2.20+).
-# Секреты (токены, IP) — в group_vars/all/vault.yml (зашифровано), используются в tasks/templates.
+# Inventory production. Connection params come from encrypted vault vars.
+# Do not put real IP/SSH/user/key values here.
 all:
   vars:
     ansible_python_interpreter: /usr/bin/python3
@@ -8,7 +8,7 @@ all:
     vps:
       hosts:
         vps-prod:
-          ansible_host: 198.51.100.10
-          ansible_user: deploy
-          ansible_port: 22
-          ansible_ssh_private_key_file: ~/.ssh/id_rsa
+          ansible_host: "{{ lookup('ansible.builtin.pipe', inventory_dir ~ '/../scripts/vault-get.sh vault_vps_ssh_host') }}"
+          ansible_user: "{{ lookup('ansible.builtin.pipe', inventory_dir ~ '/../scripts/vault-get.sh vault_vps_ssh_user') }}"
+          ansible_port: "{{ lookup('ansible.builtin.pipe', inventory_dir ~ '/../scripts/vault-get.sh vault_vps_ssh_port') | default(22, true) }}"
+          ansible_ssh_private_key_file: "{{ lookup('ansible.builtin.pipe', inventory_dir ~ '/../scripts/vault-get.sh vault_vps_ssh_key') | default('~/.ssh/id_rsa', true) }}"

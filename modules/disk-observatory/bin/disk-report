@@ -43,6 +43,9 @@ set -euo pipefail
 echo "## df -h /"
 df -h /
 echo
+echo "## df -ih /"
+df -ih /
+echo
 echo "## free -h"
 free -h
 echo
@@ -50,10 +53,25 @@ echo "## /proc/loadavg"
 cat /proc/loadavg
 echo
 echo "## du -sh top dirs"
-du -sh /var/log /var/lib/docker /var/cache /opt/* /home/* 2>/dev/null | sort -hr | head -20
+sudo du -xhd1 / /var /opt /home /root 2>/dev/null | sort -hr | head -50
 echo
 echo "## docker system df"
 docker system df 2>/dev/null || echo "docker not installed or not accessible"
+echo
+echo "## docker active images"
+docker ps -q 2>/dev/null \
+  | xargs -r docker inspect --format '{{.Name}} {{.Config.Image}} {{.Image}}' 2>/dev/null \
+  | sed 's#^/##' \
+  || echo "docker not installed or not accessible"
+echo
+echo "## docker images by created date"
+docker images --format '{{.ID}} {{.CreatedAt}} {{.Size}} {{.Repository}}:{{.Tag}}' 2>/dev/null | sort -k2r | head -80 || echo "docker not installed or not accessible"
+echo
+echo "## docker ghostroute rollback images"
+docker images --format '{{.ID}} {{.CreatedAt}} {{.Size}} {{.Repository}}:{{.Tag}}' 2>/dev/null \
+  | awk '$0 ~ /ghostroute-console:(rollback-|[0-9a-f]{7,})/ {print}' \
+  | sort -k2r \
+  || echo "docker not installed or not accessible"
 echo
 echo "## journalctl --disk-usage"
 journalctl --disk-usage 2>/dev/null || echo "journalctl unavailable"
@@ -62,7 +80,10 @@ echo "## apt cache"
 du -sh /var/cache/apt/archives 2>/dev/null || echo "0"
 echo
 echo "## Files >100M (top 50)"
-find / -xdev -type f -size +100M 2>/dev/null | head -50
+sudo find / -xdev -type f -size +100M -printf '%s %p\n' 2>/dev/null | sort -nr | head -50
+echo
+echo "## App-owned review candidates (do not auto-delete)"
+sudo find /opt/ghostroute-console/data/backups -xdev -type f -printf '%s %p\n' 2>/dev/null | sort -nr | head -20 || true
 echo
 echo "## docker dangling volumes"
 docker volume ls -f dangling=true 2>/dev/null || echo "n/a"
