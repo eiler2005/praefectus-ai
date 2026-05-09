@@ -3,7 +3,7 @@
 Полная карта всех Docker-контейнеров на VPS. Обновлять при добавлении/удалении сервисов.
 
 **Сервер:** Hetzner CX23 · 4GB RAM · 2 vCPU · Ubuntu 24.04  
-**Последний аудит:** 2026-05-03 (Этапы 2+3 завершены — mem_limit на всех сервисах)  
+**Последний аудит:** 2026-05-09 (openclaw-gateway поднят до 1224m после cgroup OOM kills)  
 **Всего контейнеров:** 13
 
 ---
@@ -15,7 +15,7 @@
 | deploy-bridge-1 | КРИТИЧНЫЙ | 256m ✅ | Задан в docker-compose.prod.yml |
 | xray | КРИТИЧНЫЙ | нет | Зона router_configuration |
 | xray-xhttp | КРИТИЧНЫЙ | нет | Зона router_configuration |
-| openclaw-openclaw-gateway-1 | КРИТИЧНЫЙ | 1024m ✅ | 70-docker-limits-critical.yml |
+| openclaw-openclaw-gateway-1 | КРИТИЧНЫЙ | 1224m ✅ | 70-docker-limits-critical.yml |
 | lightrag-lightrag-1 | ВЫСОКАЯ | 192m ✅ | 70-docker-limits-critical.yml (факт. ~117MB) |
 | omniroute | ВЫСОКАЯ | 512m ✅ | 70-docker-limits-critical.yml |
 | integration-bus-redis | ВЫСОКАЯ | 256m ✅ | 70-docker-limits-critical.yml |
@@ -78,7 +78,7 @@
 | Порты | `127.0.0.1:18789` (main), `127.0.0.1:18790` (bridge) |
 | Volumes | config dir, workspace dir, `/opt/obsidian-vault` |
 | Healthcheck | `GET /healthz` на 127.0.0.1:18789 (10s interval) |
-| mem_limit | нет (Этап 3 → ~768m) |
+| mem_limit | **1224m** ✅ (70-docker-limits-critical.yml) |
 | Роль | Основной AI gateway, точка входа для всех AI-запросов |
 | Deploy | `openclaw_firststeps/artifacts/openclaw/` |
 
@@ -220,10 +220,10 @@
 OS + system daemons:           ~500 MB
 deploy-bridge-1:                256 MB  ← лимит 256m ✅ (в docker-compose.prod.yml)
 xray + xray-xhttp:              ~51 MB  (measured, нет лимита — Этап 3)
-openclaw-gateway:              ~599 MB  (measured, нет лимита — Этап 3, крупнейший!)
-lightrag:                      ~136 MB  (measured, нет лимита — Этап 3)
-omniroute:                     ~182 MB  (measured, нет лимита — Этап 3)
-redis:                           ~6 MB  (measured, нет лимита — Этап 3)
+openclaw-gateway:              ~599 MB  (measured, лимит 1224m ✅, крупнейший)
+lightrag:                      ~136 MB  (measured, лимит 192m ✅)
+omniroute:                     ~182 MB  (measured, лимит 512m ✅)
+redis:                           ~6 MB  (measured, лимит 256m ✅)
 signals-bridge:                 ~54 MB  (measured, лимит 384m ✅)
 telethon-digest-cron-bridge:    ~32 MB  (measured, лимит 256m ✅)
 ghostroute-console:            ~132 MB  (measured, нет лимита — зона router_configuration)

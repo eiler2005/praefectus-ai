@@ -29,7 +29,7 @@
   gather_facts: false
 
   vars:
-    mem_openclaw_gateway: "{{ vault_mem_openclaw_gateway | default('1024m') }}"
+    mem_openclaw_gateway: "{{ vault_mem_openclaw_gateway | default('1224m') }}"
     mem_omniroute:        "{{ vault_mem_omniroute        | default('512m') }}"
     mem_lightrag:         "{{ vault_mem_lightrag         | default('192m') }}"
     mem_redis:            "{{ vault_mem_redis            | default('256m') }}"
