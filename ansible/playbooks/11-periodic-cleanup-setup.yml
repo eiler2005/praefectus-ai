@@ -45,20 +45,35 @@
         LOG="{{ cleanup_log_path }}"
         TS=$(date '+%Y-%m-%d %H:%M:%S')
         log() { echo "[$TS] $*" | tee -a "$LOG"; }
+        run_and_log() {
+          local label="$1"
+          shift
+          local output rc
+          set +e
+          output="$("$@" 2>&1 | tail -1)"
+          rc=$?
+          set -e
+          if [ "$rc" -eq 0 ]; then
+            log "$label: ${output:-ok}"
+          else
+            log "ERROR $label: ${output:-rc=$rc}"
+            return "$rc"
+          fi
+        }
 
         log "=== VPS periodic cleanup START ==="
 
         # APT
-        apt-get clean -y 2>&1 | tail -1 | xargs -I{} log "apt clean: {}"
+        run_and_log "apt clean" apt-get clean -y
 
         # Journal
-        journalctl --vacuum-time={{ journal_keep_time }} 2>&1 | tail -1 | xargs -I{} log "journal vacuum-time: {}"
-        journalctl --vacuum-size={{ journal_max_size }}  2>&1 | tail -1 | xargs -I{} log "journal vacuum-size: {}"
+        run_and_log "journal vacuum-time" journalctl --vacuum-time={{ journal_keep_time }}
+        run_and_log "journal vacuum-size" journalctl --vacuum-size={{ journal_max_size }}
 
         # Docker
-        docker container prune -f --filter "until={{ docker_container_age }}" 2>&1 | tail -1 | xargs -I{} log "container prune: {}"
-        docker image     prune -af --filter "until={{ docker_image_age }}"     2>&1 | tail -1 | xargs -I{} log "image prune: {}"
-        docker builder   prune -af --filter "until={{ docker_builder_age }}"   2>&1 | tail -1 | xargs -I{} log "builder prune: {}"
+        run_and_log "container prune" docker container prune -f --filter "until={{ docker_container_age }}"
+        run_and_log "image prune" docker image prune -af --filter "until={{ docker_image_age }}"
+        run_and_log "builder prune" docker builder prune -af --filter "until={{ docker_builder_age }}"
 
         # Disk after
         DISK_PCT=$(df --output=pcent / | tail -1 | tr -d ' %')
