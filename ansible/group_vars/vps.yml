@@ -17,8 +17,6 @@ audit_min_file_size_mb: 100
 # Logrotate
 logrotate_config_name: vps-management
 logrotate_targets:
-  - path: /var/log/nginx
-    pattern: "*.log"
   - path: /var/log/caddy
     pattern: "*.log"
 

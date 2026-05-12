@@ -196,15 +196,6 @@
     - name: "10 | logrotate | install config"
       ansible.builtin.raw: |
         sudo tee /etc/logrotate.d/vps-management > /dev/null << 'LOGROTATE_EOF'
-        /var/log/nginx/*.log {
-            daily
-            rotate 14
-            compress
-            delaycompress
-            missingok
-            notifempty
-            sharedscripts
-        }
         /var/log/caddy/*.log {
             daily
             rotate 14
