@@ -97,6 +97,7 @@ Top-level (корень репо):
 | Когда что запускать (auto/manual cadence) | [`maintenance-schedule.md`](runbooks/maintenance-schedule.md) |
 | Подозрение на компрометацию | [`security-incident.md`](runbooks/security-incident.md) |
 | SSH `Too many authentication failures` / MaxSessions | [`ssh-maxsessions.md`](runbooks/ssh-maxsessions.md) |
+| SSH banner timeout, direct path unavailable, VPN source changed | [`ssh-breakglass-bastion.md`](runbooks/ssh-breakglass-bastion.md) |
 
 ---
 

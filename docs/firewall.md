@@ -98,6 +98,19 @@ ssh deploy@<vps> 'sudo ufw status | head -1'
 # Никогда не выполнять без консоли Hetzner в запасе.
 ```
 
+### SSH allowlist and VPN changes
+
+SSH is allowlisted by source IP. If the operator switches to a third-party VPN,
+mobile hotspot, office network, or any other route with a new egress IP, direct
+SSH may fail even when the VPS is healthy. Before depending on that route:
+
+1. Add the new source IP to the VPS SSH allowlist and any provider firewall
+   allowlist.
+2. Verify direct SSH from that network: `./ansible/scripts/ssh-vps.sh 'echo OK'`.
+3. Keep the router bastion or Hetzner Console available before changing rules.
+
+Never replace the SSH allowlist with `Anywhere` as a convenience shortcut.
+
 ---
 
 ## Аварийный доступ
