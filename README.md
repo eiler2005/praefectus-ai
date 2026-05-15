@@ -74,6 +74,31 @@ Bring your own VPS. Fill the vault (15 minutes). Run `./verify.sh`. You have a j
 
 ---
 
+## The praefectus pattern
+
+In Roman administration, a **praefectus** was an officer appointed by a higher authority — never replacing the principal, always acting on their behalf within an explicit mandate. The *Praefectus Annonae* kept the grain supply moving. The *Praefectus Urbi* ran the city in the emperor's name. The *Praefectus Praetorio* ran the imperial household.
+
+The role worked because of three things:
+
+1. **Structured authority** — a written mandate, not vague trust.
+2. **Narrow scope** — one domain, well-bounded.
+3. **Faithful reporting back** — the principal always knew what had been done in their name.
+
+Two thousand years later, an LLM agent operating production infrastructure needs the same three things. Most LLM-agent demos skip them: an agent gets root SSH access, a vague prompt, and hope. Production teams need each principle as a real artifact:
+
+| Roman principle | What it becomes in PraefectusAI |
+|---|---|
+| Written mandate | [`AGENTS.md`](AGENTS.md) — about 200 lines, read by the agent before every action |
+| Narrow scope | [`docs/ownership-matrix.md`](docs/ownership-matrix.md) — every path on the VPS mapped to its owner; the agent refuses cross-boundary writes |
+| Deterministic actions, not freeform shell | Ansible playbooks (`ansible/playbooks/*.yml`) — idempotent, auditable, `--check --diff` mandatory before apply |
+| Read-only by default | `./verify.sh` runs anytime; mutating actions require explicit operator approval |
+| Faithful reporting back | `reports/health/*.json` (machine-readable) + [`docs/journal/`](docs/journal/) (human notes) — every action leaves a trail |
+| Catches mistakes before they ship | [`secret-scan`](modules/secrets-management/bin/secret-scan) as pre-commit + CI — agent and operator both gated |
+
+That's PraefectusAI: a 21st-century *praefectus* for your VPS. The brand is the model — structured authority + narrow scope + faithful reporting — translated into files an LLM can read and follow.
+
+---
+
 ## Features
 
 What you get when you "hire" PraefectusAI:
@@ -185,16 +210,6 @@ ansible-playbook playbooks/10-disk-cleanup.yml --check --diff   # dry-run
 ansible-playbook playbooks/10-disk-cleanup.yml                  # apply
 ./verify.sh                                                      # services should still be up
 ```
-
----
-
-## The name
-
-In Roman administration, a **praefectus** was an officer appointed by a higher authority — never replacing the principal, always acting on their behalf within an explicit mandate. The *Praefectus Annonae* kept the grain supply moving. The *Praefectus Urbi* ran the city in the emperor's name. The *Praefectus Praetorio* ran the imperial household.
-
-The role worked because of three things: structured authority (a written mandate, not vague trust), narrow scope (one domain, well-bounded), and faithful reporting back (the principal always knew what had been done in their name).
-
-That is exactly what an LLM agent should be when it touches production infrastructure: an extension of the operator's intent within a clear contract, not a substitute for their judgment. **PraefectusAI** is that contract — `AGENTS.md` as the mandate, `ownership-matrix.md` as the scope, `reports/` and `docs/journal/` as the faithful record back to the operator.
 
 ---
 

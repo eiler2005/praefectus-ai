@@ -24,6 +24,7 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 ### Changed
 
 - README section order — `Demo` and `Quick Start` moved up to sit right after `Features`, so a 30-second visitor sees runnable proof and a try-it-now path before brand story (`The name`), philosophy, architecture, and the developer-reference inventory. Reader flow becomes: hook → daily routine → employee qualities → real outputs → try it → backstory → architecture → reference. README total length dropped from 344 to 314 lines.
+- README: replaced `The name` (10-line brand-only story) with `The praefectus pattern` (~25 lines), merging the Roman etymology with the design principles previously in the cut `Why PraefectusAI exists` section. Now includes a 6-row mapping table: Roman principle → file in this repo (`AGENTS.md` = mandate, `ownership-matrix` = scope, Ansible playbooks = deterministic actions, `verify.sh` = read-only by default, `reports/` + `journal/` = faithful reporting, `secret-scan` = mistakes caught before they ship). Repositioned to between "What it does for you" and "Features" so a reader gets the full mental model — pain → offer → why-this-approach-works → what-it-has — before scrolling further.
 
 ### Notes
 
