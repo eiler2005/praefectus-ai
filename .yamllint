@@ -1,0 +1,18 @@
+---
+# yamllint configuration for PraefectusAI
+
+extends: default
+
+rules:
+  line-length:
+    max: 160
+    level: warning
+  comments-indentation: disable
+  document-start: disable
+  truthy:
+    allowed-values: ['true', 'false', 'yes', 'no']
+
+ignore: |
+  ansible/secrets/
+  reports/
+  .git/

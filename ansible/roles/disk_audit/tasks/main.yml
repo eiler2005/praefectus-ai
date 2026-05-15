@@ -1,6 +1,6 @@
 ---
-# Read-only сбор данных о диске. Безопасно запускать в любой момент.
-# Регистрирует факты для последующих ролей и опционально пишет отчёт в reports/.
+# Read-only disk data collection. Safe to run at any time.
+# Registers facts for downstream roles and optionally writes a report into reports/.
 
 - name: "audit | df -h /"
   ansible.builtin.command: df -BM --output=target,size,used,avail,pcent /
@@ -26,7 +26,7 @@
   register: audit_top_du
   changed_when: false
   check_mode: false
-  failed_when: false  # некоторые пути могут отсутствовать на свежей VM
+  failed_when: false  # some paths may be absent on a fresh VM
 
 - name: "audit | top {{ audit_top_files }} files larger than {{ audit_min_file_size_mb }}M"
   ansible.builtin.shell: |
@@ -46,7 +46,7 @@
   register: audit_docker_df
   changed_when: false
   check_mode: false
-  failed_when: false  # docker может быть не установлен (свежая VM)
+  failed_when: false  # docker may not be installed (fresh VM)
 
 - name: "audit | docker active images"
   ansible.builtin.shell: |

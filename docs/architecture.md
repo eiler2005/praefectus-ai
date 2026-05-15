@@ -1,76 +1,82 @@
 # Architecture
 
-## Принцип: host vs app ownership
+## Principle: host vs application ownership
 
-`vps_management` владеет **хостом**. Дочерние проекты владеют **своими приложениями**.
+PraefectusAI manages the **host**. Application owners manage **their applications**.
 
-Это разделение позволяет:
-- Постепенно мигрировать (не нужно переписывать всё разом).
-- Чётко отвечать на вопрос "кто это деплоил" → читай `docs/ownership-matrix.md`.
-- Безопасно автоматизировать host maintenance (диск, мониторинг) без риска снести application data.
+This split lets you:
 
-## Слои
+- Migrate gradually — no need to rewrite every project's deploy at once.
+- Answer "who deployed this?" deterministically — see [`ownership-matrix.md`](ownership-matrix.md).
+- Automate host maintenance (disk, monitoring, security) without risking application data.
+
+## Layers
 
 ```
-┌─────────────────────────────────────────────────────────────┐
-│  L4: Application data                                        │
-│  /opt/<app>/{data,workspace,config}                          │
-│  Владелец: проект-владелец app. vps_management только бэкап. │
-├─────────────────────────────────────────────────────────────┤
-│  L3: Application runtime                                     │
-│  /opt/<app>/docker-compose.yml + образа                      │
-│  Владелец: проект-владелец app. vps_management не трогает.   │
-│  Override-файлы (override.local.yml для лимитов) — наша зона.│
-├─────────────────────────────────────────────────────────────┤
-│  L2: Container runtime + system services                     │
-│  Docker daemon, sshd, ufw, fail2ban, systemd                 │
-│  Владелец: vps_management.                                   │
-├─────────────────────────────────────────────────────────────┤
-│  L1: Host OS                                                 │
-│  Ubuntu 24.04 пакеты, /var/log, /var/lib, sysctl             │
-│  Владелец: vps_management.                                   │
-├─────────────────────────────────────────────────────────────┤
-│  L0: Hardware / провайдер                                    │
-│  Hetzner Cloud (CX23, IP allocation, snapshots)              │
-│  Владелец: оператор через Hetzner Console.                   │
-└─────────────────────────────────────────────────────────────┘
+┌──────────────────────────────────────────────────────────────┐
+│  L4: Application data                                         │
+│  /opt/<app>/{data,workspace,config}                           │
+│  Owner: application project. PraefectusAI handles backup only.│
+├──────────────────────────────────────────────────────────────┤
+│  L3: Application runtime                                      │
+│  /opt/<app>/docker-compose.yml + images                       │
+│  Owner: application project. PraefectusAI does not touch.     │
+│  Override files (override.local.yml for limits) — our zone.   │
+├──────────────────────────────────────────────────────────────┤
+│  L2: Container runtime + system services                      │
+│  Docker daemon, sshd, ufw, fail2ban, systemd                  │
+│  Owner: PraefectusAI.                                         │
+├──────────────────────────────────────────────────────────────┤
+│  L1: Host OS                                                  │
+│  Linux distro packages, /var/log, /var/lib, sysctl            │
+│  Owner: PraefectusAI.                                         │
+├──────────────────────────────────────────────────────────────┤
+│  L0: Hardware / cloud provider                                │
+│  Hetzner / AWS / DigitalOcean (instance, IP, snapshots)       │
+│  Owner: operator via provider console.                        │
+└──────────────────────────────────────────────────────────────┘
 ```
 
-## Что vps_management делает
+## What PraefectusAI does
 
-- **Bootstrap (планируется)** — `00-bootstrap.yml` приводит свежую CX23 в готовое состояние.
-- **Maintenance** — `10-disk-cleanup.yml` (этот этап), `20-monitoring.yml` (планируется), `30-backup.yml` (планируется), `40-security.yml` (планируется).
-- **Audit/Verify** — `99-verify.yml` read-only health gate.
-- **Secrets** — единый Ansible Vault для всех VPS-access реквизитов.
+- **Bootstrap** *(planned: `00-bootstrap.yml`)* — bring a fresh VM to a known baseline state.
+- **Maintenance** — `10-disk-cleanup.yml`, `11-periodic-cleanup-setup.yml`, `20-monitoring.yml`, `30-backup.yml`, `40-security.yml`.
+- **Limits** — `60-docker-limits.yml`, `70-docker-limits-critical.yml` (host-side `mem_limit` policy via override files).
+- **Audit / verify** — `99-verify.yml` read-only health gate.
+- **Secrets** — single Ansible Vault for every VPS-access credential.
 
-## Что vps_management НЕ делает
+## What PraefectusAI does **not** do
 
-- Не деплоит приложения. Это делают сами проекты (`maxtg_bridge/infra/ansible/`, `openclaw_firststeps/scripts/deploy-*.sh`, `router_configuration/deploy.sh`).
-- Не редактирует основные `docker-compose.yml` приложений.
-- Не управляет application secrets (TG_BOT_TOKEN, OPENAI_API_KEY и т.п.) — они в `.env.secrets` приложения.
-- Не отвечает за application-level health (внутренние ошибки бизнес-логики). Только за то, что контейнер running и порт отвечает.
+- Does not deploy applications. That is the application owner's job (their own ansible / scripts / CI).
+- Does not edit application `docker-compose.yml` files.
+- Does not manage application secrets (TG bot tokens, OpenAI keys, etc.) — those live in the application's own `.env.secrets` or vault.
+- Does not own application-level health (business-logic errors). It only checks that the container is running and the port answers.
 
-## Связь с другими проектами
+## Cross-project coordination
 
-| Проект | Связь | Кто инициирует |
-|---|---|---|
-| `router_configuration` | Делит `/etc/{caddy,xray,unbound}` | router_configuration деплоит, vps_management только верифицирует |
-| `maxtg_bridge` | Делит `/opt/maxtg-bridge` | maxtg_bridge деплоит, vps_management бэкапит data + чистит docker images |
-| `openclaw_firststeps` | Делит `/opt/openclaw`, `/opt/lightrag`, `/opt/{telethon-digest,...}` | openclaw деплоит, vps_management мониторит память + бэкапит workspace |
+Every other project that ships code into `/opt/<app>/` is an "application owner" in this model. Coordination flows through three artefacts:
 
-## Vault как single source of truth
+| Artefact | Purpose |
+|---|---|
+| `docs/ownership-matrix.md` | Authoritative map: path → owner → can PraefectusAI modify? |
+| `docker-compose.override.local.yml` | Host-policy overrides written by PraefectusAI alongside the owner's compose file (memory limits, restart policy, log caps). |
+| Vault | Single source of truth for VPS access credentials. Application owners read VPS host/SSH from here, not from their own secrets. |
 
-Все секреты доступа (IP, SSH, port, ключи, токены алёртов) — в `ansible/secrets/vault.yml`. Дочерние проекты постепенно переводятся на чтение значений отсюда (через `ansible-vault view` или плейсхолдер в их inventory).
+The escalation path during incidents is documented in [`ownership-matrix.md`](ownership-matrix.md).
 
-Сейчас (этап 1): vault содержит копию реквизитов; чужие проекты работают со своими копиями. Миграция — отдельный roadmap-item.
+## Vault as single source of truth
 
-## Workflow для изменений
+Every access credential — VPS IP, SSH user, port, deploy key, alert tokens, backup credentials — lives in `ansible/secrets/vault.yml`. Application projects read these values via `ansible-vault view` or use placeholders in their own configs.
 
-1. Прочитать AGENTS.md.
-2. Прочитать relevant runbook в `docs/runbooks/`.
-3. Если зона другого проекта — прочитать `docs/ownership-matrix.md`, скоординироваться.
-4. Изменить роль/плейбук, синтаксис проверить (`--syntax-check`).
-5. `--check --diff` против prod — review diff.
+The vault password (`~/.vault_pass.txt`) lives only on the operator's control machine, encrypted offsite as backup.
+
+## Workflow for changes
+
+1. Read [`AGENTS.md`](../AGENTS.md).
+2. Read the relevant runbook in [`docs/runbooks/`](runbooks/).
+3. If the change touches another owner's zone, read [`ownership-matrix.md`](ownership-matrix.md) and coordinate.
+4. Edit the role / playbook; check syntax with `--syntax-check`.
+5. Run `--check --diff` against production; review the diff line by line.
 6. Apply.
-7. `verify.sh` — должен быть зелёным.
-8. Коммит (только с явного разрешения).
+7. Run `./verify.sh`; it must be green.
+8. Commit only with explicit operator approval.

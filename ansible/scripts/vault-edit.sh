@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
-# Удобная обёртка для редактирования vault.
-# Использует $EDITOR (по умолчанию vim).
+# Convenience wrapper for editing the vault.
+# Uses $EDITOR (defaults to vim).
 
 set -euo pipefail
 

@@ -1,6 +1,6 @@
 ---
-# Healthcheck для одного контейнера. Включается через include_tasks с loop_var=hc_item.
-# Поддерживает три типа: docker (нативный healthcheck), http://..., tcp:host:port
+# Healthcheck for a single container. Included via include_tasks with loop_var=hc_item.
+# Supports three types: docker (native healthcheck), http://..., tcp:host:port
 
 - name: "healthcheck | docker inspect for {{ hc_item.name }}"
   ansible.builtin.command: >

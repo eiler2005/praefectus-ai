@@ -1,0 +1,50 @@
+---
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+jobs:
+  secret-scan:
+    name: Secret-leak scanner
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Run secret-scan
+        run: ./modules/secrets-management/bin/secret-scan
+
+  ansible-syntax:
+    name: Ansible playbook syntax check
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install Ansible
+        run: pip install ansible
+      - name: Syntax check
+        run: |
+          cd ansible
+          ansible-playbook --syntax-check playbooks/*.yml
+
+  lint:
+    name: yamllint + ansible-lint
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install linters
+        run: pip install yamllint ansible-lint
+      - name: Run yamllint
+        run: yamllint .
+      - name: Run ansible-lint
+        run: ansible-lint ansible/playbooks/ ansible/roles/ --exclude ansible/secrets/

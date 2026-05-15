@@ -1,0 +1,37 @@
+---
+# Pre-commit hooks for PraefectusAI.
+# Install once: pre-commit install
+# Run on all files: pre-commit run --all-files
+
+repos:
+  - repo: local
+    hooks:
+      - id: secret-scan
+        name: PraefectusAI secret scanner
+        entry: ./modules/secrets-management/bin/secret-scan
+        language: system
+        pass_filenames: false
+        always_run: true
+        description: Greps the repo for leaked IPs, keys, and tokens. Must exit 0.
+
+      - id: ansible-syntax-check
+        name: Ansible playbook syntax check
+        entry: bash -c 'cd ansible && ansible-playbook --syntax-check playbooks/*.yml'
+        language: system
+        pass_filenames: false
+        files: '^ansible/.*\.(yml|yaml)$'
+        description: Validates that every playbook parses correctly.
+
+  - repo: https://github.com/adrienverge/yamllint
+    rev: v1.35.1
+    hooks:
+      - id: yamllint
+        files: '\.(yml|yaml)$'
+        args: [-c=.yamllint]
+
+  - repo: https://github.com/ansible/ansible-lint
+    rev: v24.7.0
+    hooks:
+      - id: ansible-lint
+        files: '^ansible/.*\.(yml|yaml)$'
+        args: ['--exclude', 'ansible/secrets/']

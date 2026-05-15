@@ -2,12 +2,11 @@
 
 # Claude Code
 
-Все shared правила — в [AGENTS.md](AGENTS.md). Этот файл — короткие локальные заметки для Claude Code конкретно.
+All shared rules live in [`AGENTS.md`](AGENTS.md). This file holds short Claude Code-specific notes only.
 
 ## Local notes
 
-- Vault password живёт в `~/.vault_pass.txt` (mode 0600). Создаётся вручную, бэкап в 1Password.
-- Перед любым плейбуком кроме `99-verify` — сначала `--check --diff`, потом apply.
-- Если меняешь `vault.yml` — синхронно обнови `vault.yml.example` без значений (только новые ключи).
-- Если впервые трогаешь зону другого проекта (`/opt/maxtg-bridge`, `/opt/openclaw`, etc.) — сначала прочитай [`docs/ownership-matrix.md`](docs/ownership-matrix.md).
-- `lean-ctx` MCP инструменты предпочтительны (см. global CLAUDE.md): `ctx_read` вместо `Read` для повторных чтений, `ctx_search` вместо `grep`, `ctx_shell` вместо `bash` для команд с большим выводом.
+- Vault password lives in `~/.vault_pass.txt` (mode `0600`). Created manually; backed up in a password manager.
+- Before any playbook other than `99-verify`, run `--check --diff` first, then apply.
+- When changing `vault.yml`, mirror the schema (no values, only key names) into `vault.yml.example` in the same commit.
+- Before touching another owner's directory (`/opt/<app>/`), read [`docs/ownership-matrix.md`](docs/ownership-matrix.md) first.

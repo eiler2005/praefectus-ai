@@ -1,12 +1,12 @@
 ---
-# Read-only health gate. Никаких изменений на хосте.
-# Собирает 12 проверок, классифицирует ok/warn/fail, пишет отчёт в reports/.
+# Read-only health gate. No mutations on the host.
+# Runs 12 checks, classifies them ok/warn/fail, writes a report to reports/.
 
 - name: "verify | init result accumulator"
   ansible.builtin.set_fact:
     verify_results: []
 
-# === 1. SSH reachability — уже доказано фактом успешного gather_facts ===
+# === 1. SSH reachability — already proved by successful task execution ===
 - name: "verify | 1) ssh reachability"
   ansible.builtin.set_fact:
     verify_results: "{{ verify_results + [{'check': 'ssh', 'status': 'ok', 'detail': 'connected'}] }}"
@@ -132,7 +132,7 @@
     label: "{{ item.name }}"
   when: verify_check_containers | bool
 
-# === 7. Container healthchecks (для running контейнеров) ===
+# === 7. Container healthchecks (for running containers) ===
 - name: "verify | 7) container healthchecks"
   ansible.builtin.include_tasks: healthcheck.yml
   loop: "{{ vault_expected_containers | default([]) }}"
@@ -143,7 +143,7 @@
     - verify_check_containers | bool
     - hc_item.name in vfy_running_containers
 
-# === 8. UFW status (опционально, не fail если не установлен) ===
+# === 8. UFW status (optional; do not fail if not installed) ===
 - name: "verify | 8a) ufw status"
   ansible.builtin.command: ufw status
   become: true

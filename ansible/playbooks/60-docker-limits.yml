@@ -1,25 +1,25 @@
 ---
-# Устанавливает memory limits для менее критичных контейнеров через
-# docker-compose.override.local.yml в каждой /opt/<app>/ директории.
+# Applies memory limits to less-critical containers by writing
+# docker-compose.override.local.yml into each /opt/<app>/ directory.
 #
-# Критичные сервисы (openclaw-gateway, lightrag, omniroute, redis) — НЕ трогаем.
-# Зоны router_configuration (xray, ghostroute-console) — НЕ трогаем.
+# Critical services (gateway / lightrag / omniroute / redis) — handled in 70-*.
+# Routing-side zones (xray, ghostroute-console, ...) — left untouched.
 #
-# После применения override-файлов контейнеры надо перезапустить ВРУЧНУЮ:
+# After applying override files, the containers must be restarted MANUALLY:
 #   cd /opt/<app> && docker compose up -d
-# Playbook показывает команды, но НЕ перезапускает сам.
+# This playbook prints the commands but does not run them.
 #
 # Workflow:
-#   ansible-playbook playbooks/60-docker-limits.yml --check   (dry-run)
-#   ansible-playbook playbooks/60-docker-limits.yml           (apply)
-#   # Затем вручную перезапустить затронутые сервисы и запустить 99-verify.yml
+#   ansible-playbook playbooks/60-docker-limits.yml --check   # dry-run
+#   ansible-playbook playbooks/60-docker-limits.yml           # apply
+#   # Then manually restart affected services and run 99-verify.yml
 
-- name: "60 | Docker memory limits — менее критичные сервисы"
+- name: "60 | Docker memory limits — less-critical services"
   hosts: vps
   gather_facts: false
 
   vars:
-    # Менее критичные сервисы — ставим лимиты сейчас
+    # Less-critical services — apply limits now
     mem_wiki_import:             "{{ vault_mem_wiki_import             | default('256m') }}"
     mem_agentmail_email:         "{{ vault_mem_agentmail_email         | default('256m') }}"
     mem_agentmail_work_email:    "{{ vault_mem_agentmail_work_email    | default('256m') }}"
@@ -28,7 +28,7 @@
 
   tasks:
     # ---- AUDIT ----
-    - name: "60 | audit | текущее потребление RAM"
+    - name: "60 | audit | current RAM usage"
       ansible.builtin.raw: !unsafe |
         docker stats --no-stream --format \
           "table {{.Name}}\t{{.MemUsage}}\t{{.MemPerc}}" 2>/dev/null
@@ -40,7 +40,7 @@
       ansible.builtin.debug:
         msg: "{{ docker_stats.stdout_lines }}"
 
-    - name: "60 | audit | проверить существующие override-файлы"
+    - name: "60 | audit | check existing override files"
       ansible.builtin.raw: |
         for d in /opt/wiki-import /opt/agentmail-email /opt/agentmail-work-email \
                  /opt/telethon-digest /opt/signals-bridge; do
@@ -87,9 +87,10 @@
       changed_when: "'CHANGED' in r_agentmail_email.stdout"
 
     # ---- agentmail-work-email: 256m ----
-    # ВАЖНО: сервис в docker-compose.yml называется agentmail-email-bridge (не agentmail-work-email-bridge).
-    # container_name задаётся через ${EMAIL_CONTAINER_NAME} из env_file (не из shell), поэтому
-    # при перезапуске нужно передавать env vars явно (см. restart command ниже).
+    # IMPORTANT: the service in docker-compose.yml is named agentmail-email-bridge
+    # (not agentmail-work-email-bridge). container_name is set via
+    # ${EMAIL_CONTAINER_NAME} from env_file (not from shell), so on restart you
+    # must pass env vars explicitly (see restart command below).
     - name: "60 | limits | agentmail-work-email-bridge ({{ mem_agentmail_work_email }})"
       ansible.builtin.raw: |
         sudo tee /opt/agentmail-work-email/docker-compose.override.local.yml > /dev/null << 'EOF'
@@ -136,7 +137,7 @@
       changed_when: "'CHANGED' in r_signals.stdout"
 
     # ---- SUMMARY ----
-    - name: "60 | summary | что изменилось"
+    - name: "60 | summary | what changed"
       ansible.builtin.debug:
         msg:
           - "================================================="
@@ -148,21 +149,21 @@
           - "telethon-digest-cron:      {{ mem_telethon_digest }}  (changed: {{ r_telethon.changed }})"
           - "signals-bridge:            {{ mem_signals_bridge }}  (changed: {{ r_signals.changed }})"
           - "================================================="
-          - "НЕ затронуты (критичные / чужая зона):"
-          - "  openclaw-gateway, lightrag, omniroute, redis"
-          - "  xray, xray-xhttp, ghostroute-console (router_configuration)"
-          - "  deploy-bridge-1 (уже имеет 256m)"
+          - "NOT touched (critical or other-owner zones):"
+          - "  critical-gateway, knowledge-graph, router-service, integration-bus  (covered by 70-*)"
+          - "  routing-side containers (owned by routing project)"
+          - "  bridge-service (limit already set in its own prod compose)"
           - "================================================="
-          - "СЛЕДУЮЩИЙ ШАГ — перезапустить затронутые контейнеры:"
-          - "  ssh deploy@<vps> 'cd /opt/wiki-import && sudo docker compose -f docker-compose.yml -f docker-compose.override.local.yml up -d'"
-          - "  ssh deploy@<vps> 'cd /opt/agentmail-email && sudo docker compose -f docker-compose.yml -f docker-compose.override.local.yml up -d'"
-          - "  # agentmail-work-email: требует ENV vars для interpolation container_name:"
-          - "  ssh deploy@<vps> 'cd /opt/agentmail-work-email && sudo env EMAIL_CONTAINER_NAME=agentmail-work-email-bridge EMAIL_STATE_VOLUME=agentmail-work-email-state EMAIL_BRIDGE_PORT=8094 docker compose -f docker-compose.yml -f docker-compose.override.local.yml up -d'"
-          - "  # telethon-digest: ТОЛЬКО cron-bridge, не все сервисы (в compose есть telethon-digest + telethon-digest-cron-bridge):"
-          - "  ssh deploy@<vps> 'cd /opt/telethon-digest && sudo docker compose -f docker-compose.yml -f docker-compose.override.local.yml up -d telethon-digest-cron-bridge'"
-          - "  ssh deploy@<vps> 'cd /opt/signals-bridge && sudo docker compose -f docker-compose.yml -f docker-compose.override.local.yml up -d'"
+          - "NEXT STEP — restart the affected containers:"
+          - "  ssh deploy@<vps> 'cd /opt/<wiki-import> && sudo docker compose -f docker-compose.yml -f docker-compose.override.local.yml up -d'"
+          - "  ssh deploy@<vps> 'cd /opt/<email-bridge-1> && sudo docker compose -f docker-compose.yml -f docker-compose.override.local.yml up -d'"
+          - "  # email-bridge-2: requires ENV vars for container_name interpolation"
+          - "  ssh deploy@<vps> 'cd /opt/<email-bridge-2> && sudo env EMAIL_CONTAINER_NAME=<container-name> EMAIL_STATE_VOLUME=<vol-name> EMAIL_BRIDGE_PORT=<port> docker compose -f docker-compose.yml -f docker-compose.override.local.yml up -d'"
+          - "  # cron-bridge: ONLY the cron service, not the whole compose"
+          - "  ssh deploy@<vps> 'cd /opt/<cron-bridge> && sudo docker compose -f docker-compose.yml -f docker-compose.override.local.yml up -d <service-name>'"
+          - "  ssh deploy@<vps> 'cd /opt/<signals-bridge> && sudo docker compose -f docker-compose.yml -f docker-compose.override.local.yml up -d'"
           - "  ansible-playbook playbooks/99-verify.yml"
           - "================================================="
-          - "Проверить что лимит применился:"
-          - "  docker inspect wiki-import | grep -i memory"
+          - "Verify the limit was applied:"
+          - "  docker inspect <container> | grep -i memory"
           - "================================================="

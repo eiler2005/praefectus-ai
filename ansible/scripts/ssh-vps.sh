@@ -1,12 +1,12 @@
 #!/usr/bin/env bash
-# SSH в VPS используя реквизиты из vault.
-# Без аргументов — открывает интерактивную сессию.
-# С аргументами — выполняет команду и возвращает результат.
+# SSH into the VPS using credentials from the vault.
+# No args  → interactive session.
+# With args → run the command and return its output.
 #
-# Примеры:
+# Examples:
 #   ./ansible/scripts/ssh-vps.sh
 #   ./ansible/scripts/ssh-vps.sh 'df -h /'
-#   ./ansible/scripts/ssh-vps.sh --print-host    # печатает только host (для embed)
+#   ./ansible/scripts/ssh-vps.sh --print-host    # print host only (for embedding)
 
 set -euo pipefail
 

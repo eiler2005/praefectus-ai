@@ -1,7 +1,7 @@
 ---
-# Non-secret VPS-specific defaults. Реальные значения порогов и фильтров — в vault.
+# Non-secret VPS-specific defaults. Real threshold / filter values live in vault.
 
-# Список путей под мониторингом (для disk_audit, не секреты)
+# Paths watched by disk_audit (not secrets)
 audit_paths:
   - /var/log
   - /var/lib/docker
@@ -9,7 +9,7 @@ audit_paths:
   - /opt
   - /home
 
-# Top-N для отчётов
+# Report top-N
 audit_top_dirs: 20
 audit_top_files: 50
 audit_min_file_size_mb: 100
@@ -20,13 +20,13 @@ logrotate_targets:
   - path: /var/log/caddy
     pattern: "*.log"
 
-# Ожидаемые application directories (sanity check в 99-verify)
+# Expected application directories (sanity check in 99-verify)
 expected_app_dirs:
-  - /opt/maxtg-bridge
-  - /opt/openclaw
-  - /opt/lightrag
+  - /opt/<app-1>
+  - /opt/<app-2>
+  - /opt/<app-3>
 
-# Health thresholds defaults (могут переопределяться в vault)
+# Health threshold defaults (overridable from vault)
 disk_warn_pct_default: 80
 disk_crit_pct_default: 90
 mem_warn_mb_default: 500

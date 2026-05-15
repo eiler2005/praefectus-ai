@@ -1,48 +1,47 @@
-# Maintenance schedule — vps-prod
+# Maintenance schedule
 
-Профилактические процедуры, их периодичность и ответственные.
+Preventive procedures, cadence, and ownership.
 
 ---
 
-## Еженедельно — автоматически (systemd timer)
+## Weekly — automatic (systemd timer)
 
-**Таймер:** `vps-cleanup.timer` (Sun 03:00 UTC)
-**Скрипт:** `/usr/local/bin/vps-periodic-cleanup.sh`
-**Лог:** `/var/log/vps-periodic-cleanup.log`
-**Установить/обновить:** `ansible-playbook playbooks/11-periodic-cleanup-setup.yml`
+**Timer:** `vps-cleanup.timer` (Sun 03:00 UTC)
+**Script:** `/usr/local/bin/vps-periodic-cleanup.sh`
+**Log:** `/var/log/vps-periodic-cleanup.log`
+**Install / update:** `ansible-playbook playbooks/11-periodic-cleanup-setup.yml`
 
-Legacy `vps-weekly-cleanup.timer` должен быть disabled/removed. Не включай два weekly cleanup timer одновременно.
+The legacy `vps-weekly-cleanup.timer` must be disabled / removed. Never run two weekly cleanup timers at once.
 
-| Операция | Команда | Безопасность |
+| Operation | Command | Safety |
 |---|---|---|
-| apt clean | `apt-get clean` | ОС-уровень, данные не затрагиваются |
-| apt autoremove | `apt-get autoremove --purge` | ОС-уровень |
-| journal vacuum | `journalctl --vacuum-time=14d --vacuum-size=500M` | логи ≤14d и ≤500MB |
-| docker container prune | `--filter "until=72h"` | только остановленные >3d |
-| docker image prune | `--filter "until=168h"` | только неиспользуемые >7d |
+| apt clean | `apt-get clean` | OS-level, data untouched |
+| apt autoremove | `apt-get autoremove --purge` | OS-level |
+| journal vacuum | `journalctl --vacuum-time=14d --vacuum-size=500M` | logs ≤ 14 d and ≤ 500 MB |
+| docker container prune | `--filter "until=72h"` | only stopped > 3 d |
+| docker image prune | `--filter "until=168h"` | only unused > 7 d |
 | docker builder prune | `--filter "until=168h"` | build cache |
 
-**Никогда автоматически:** `docker volume prune` — volumes хранят state.
+**Never automatically:** `docker volume prune` — volumes hold state.
 
-### Получить лог с VPS на Mac
+### Pull the cleanup log to the control machine
 
 ```bash
-# Текущий месяц
+# Current month
 ./modules/maintenance-journal/bin/cleanup-fetch
 
-# Все месяцы
+# All months
 ./modules/maintenance-journal/bin/cleanup-fetch --all
 
-# Только в stdout (без записи файла)
+# stdout only (no file written)
 ./modules/maintenance-journal/bin/cleanup-fetch --stdout
 ```
 
-Результат сохраняется в `reports/maintenance/YYYY-MM.md`.
+The result is saved to `reports/maintenance/YYYY-MM.md`.
 
-### Проверка и починка таймера
+### Timer health check and repair
 
-Если `systemctl --failed` показывает `vps-cleanup.service`, сначала читать лог
-сервиса и лог скрипта:
+If `systemctl --failed` shows `vps-cleanup.service`, read the service log and the script log first:
 
 ```bash
 ssh deploy@<vps> 'sudo systemctl status vps-cleanup.service --no-pager'
@@ -50,9 +49,7 @@ ssh deploy@<vps> 'sudo journalctl -u vps-cleanup.service -n 80 --no-pager'
 ssh deploy@<vps> 'sudo tail -80 /var/log/vps-periodic-cleanup.log'
 ```
 
-Скрипт `/usr/local/bin/vps-periodic-cleanup.sh` managed by Ansible; не править
-его руками на VPS. Исправления вносить в
-`ansible/playbooks/11-periodic-cleanup-setup.yml`, затем:
+The script `/usr/local/bin/vps-periodic-cleanup.sh` is managed by Ansible — don't edit it on the VPS. Make fixes in `ansible/playbooks/11-periodic-cleanup-setup.yml`, then:
 
 ```bash
 cd ansible
@@ -62,68 +59,68 @@ ssh deploy@<vps> 'sudo systemctl reset-failed vps-cleanup.service && sudo system
 ssh deploy@<vps> 'sudo systemctl is-active vps-cleanup.timer && sudo systemctl is-failed vps-cleanup.service'
 ```
 
-Ожидаемо: timer `active`, service после oneshot-run `inactive`, не `failed`.
+Expected: timer `active`; service after the oneshot-run is `inactive`, not `failed`.
 
 ---
 
-## Еженедельно — вручную (ручной запуск)
+## Weekly — manual (on demand)
 
-Запускать после проверки `verify.sh` или по необходимости.
+Run after `verify.sh` reports something, or as needed.
 
 ```bash
-# Ручная чистка (с отчётом в reports/cleanup-*.md)
-ansible-playbook playbooks/10-disk-cleanup.yml --check  # dry-run
-ansible-playbook playbooks/10-disk-cleanup.yml          # apply
+# Manual cleanup (writes reports/cleanup-*.md)
+ansible-playbook playbooks/10-disk-cleanup.yml --check
+ansible-playbook playbooks/10-disk-cleanup.yml
 
-# Проверка что всё живо
+# Sanity check
 ./verify.sh
 ```
 
 ---
 
-## Ежемесячно — вручную
+## Monthly — manual
 
-Выполнять в первых числах месяца. Ориентир: ~30 минут.
+In the first week of the month. Budget ~ 30 min.
 
-| Задача | Команда | Примечание |
+| Task | Command | Note |
 |---|---|---|
-| Dangling volumes review | `ssh deploy@<vps> 'docker volume ls -f dangling=true'` | Инспектировать каждый; удалять только осиротевшие |
-| `/opt/*` размеры | `ssh deploy@<vps> 'sudo du -xhd1 /opt \| sort -hr'` | Если аномальный рост — разбираться с владельцем |
-| lightrag/data audit | `ssh deploy@<vps> 'du -sh /opt/lightrag/data'` | При >5GB — обсудить переиндексацию |
-| Syncthing conflicts | `ssh deploy@<vps> 'find /opt/obsidian-vault -name "*.sync-conflict-*" \| head -20'` | Разрешить вручную |
-| SSH authorized_keys | `ssh deploy@<vps> 'cat ~/.ssh/authorized_keys'` | Подтвердить что нет лишних ключей |
-| Apt pinned versions | `ssh deploy@<vps> 'apt list --upgradable 2>/dev/null'` | Проверить pending security updates |
-| Записать в журнал | `docs/journal/YYYY-MM.md` | Любые нетривиальные изменения |
+| Dangling volumes review | `ssh deploy@<vps> 'docker volume ls -f dangling=true'` | Inspect each; remove only orphans |
+| `/opt/*` sizes | `ssh deploy@<vps> 'sudo du -xhd1 /opt \| sort -hr'` | Anomalous growth → escalate to owner |
+| Application data growth audit | per-app `du -sh` | Coordinate with owner if > expected |
+| Syncthing conflicts | `ssh deploy@<vps> 'find /opt/<sync-vault> -name "*.sync-conflict-*" \| head -20'` | Resolve manually |
+| `authorized_keys` audit | `ssh deploy@<vps> 'cat ~/.ssh/authorized_keys'` | Confirm no extraneous keys |
+| Pending security updates | `ssh deploy@<vps> 'apt list --upgradable 2>/dev/null'` | Note any pending patches |
+| Journal entry | `docs/journal/YYYY-MM.md` | Any non-trivial change |
 
 ---
 
-## Ежеквартально — вручную
+## Quarterly — manual
 
-| Задача | Как | Примечание |
+| Task | How | Note |
 |---|---|---|
-| Secret rotation review | Просмотр vault + authorized_keys | Когда последний раз меняли? |
-| Image vulnerability scan | `trivy image <name>` для всех running | Критичные CVE — обновить image |
-| DR drill (опц.) | Restore test на fresh CX23 | Проверяет backup + bootstrap |
-| Memory budget review | `docker stats --no-stream` vs limits в docs/containers.md | Скорректировать лимиты при drift |
+| Secret rotation review | Inspect vault + authorized_keys | When were they last rotated? |
+| Image vulnerability scan | `trivy image <name>` for every running image | Critical CVE → rebuild |
+| DR drill (optional) | Restore test on a fresh VPS | Validates backup + bootstrap |
+| Memory budget review | `docker stats --no-stream` vs limits in `docs/containers.md` | Adjust limits on drift |
 
 ---
 
-## Красные линии (НИКОГДА автоматом)
+## Red lines (NEVER automatically)
 
-- `docker volume prune` — volumes = state приложений
-- `docker system prune -a` без `--filter "until=Nh"`
-- `docker compose down -v` в `/opt/*`
-- `apt full-upgrade` или `do-release-upgrade`
-- Перезагрузка VPS без явного разрешения
-- Удаление содержимого `/opt/<app>/data` или `/opt/<app>/workspace`
+- `docker volume prune` — volumes hold application state.
+- `docker system prune -a` without `--filter "until=Nh"`.
+- `docker compose down -v` anywhere under `/opt/`.
+- `apt full-upgrade` or `do-release-upgrade`.
+- VPS reboot without explicit approval.
+- Removing contents of any application data dir.
 
 ---
 
-## Файлы и артефакты
+## Files and artefacts
 
-| Артефакт | Где |
+| Artefact | Where |
 |---|---|
-| Отчёты ручной чистки | `reports/cleanup-<ts>.md` (gitignored) |
-| Агрегированные weekly logs | `reports/maintenance/YYYY-MM.md` (gitignored) |
-| Журнал ручных изменений | `docs/journal/YYYY-MM.md` (в git) |
-| Weekly cleanup лог на VPS | `/var/log/vps-periodic-cleanup.log` |
+| Manual cleanup reports | `reports/cleanup-<ts>.md` (gitignored) |
+| Aggregated weekly logs | `reports/maintenance/YYYY-MM.md` (gitignored) |
+| Manual change journal | `docs/journal/YYYY-MM.md` (in git) |
+| Weekly cleanup log on VPS | `/var/log/vps-periodic-cleanup.log` |

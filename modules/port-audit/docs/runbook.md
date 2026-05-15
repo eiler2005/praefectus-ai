@@ -1,66 +1,62 @@
 # Port audit runbook
 
-## Цель
+## Goal
 
-Убедиться что на VPS нет неожиданных открытых портов и нет небезопасных bindings (приватный сервис торчит на 0.0.0.0).
+Confirm that no unexpected ports are open on the VPS, and no private services are bound to `0.0.0.0` instead of `127.0.0.1`.
 
-## Запуск
+## Run
 
 ```bash
-# Стандартный audit (сравнение с docs/ports.md)
+# Standard audit (compares live state with docs/ports.md)
 ./modules/port-audit/bin/port-audit
 
-# + сохранить отчёт в reports/
+# Same, plus save a snapshot to reports/
 ./modules/port-audit/bin/port-audit --save
 
-# Только посмотреть текущие listeners (без сравнения)
+# Show only current listeners (no comparison)
 ./modules/port-audit/bin/port-audit --live-only
 ```
 
-Результат: exit 0 — OK, exit 1 — проблемы найдены.
+Exit codes: `0` — OK, `1` — discrepancies found.
 
-## Интерпретация результатов
+## Interpreting results
 
-### NEW port (не в docs/ports.md)
+### NEW port (not in docs/ports.md)
 
-Новый публичный порт (0.0.0.0) → **немедленная проверка**:
-1. `ssh deploy@<vps> 'ss -tlnp | grep :<port>'` — какой процесс слушает
-2. `ssh deploy@<vps> 'docker ps --format "{{.Names}} {{.Ports}}"'` — может, новый контейнер
-3. Если легитимный — добавить в `docs/ports.md`
-4. Если неизвестный — см. `docs/runbooks/security-incident.md`
+A new public port (`0.0.0.0`) → **investigate immediately**:
 
-Новый приватный порт (127.0.0.1) → менее срочно, но добавить в `docs/ports.md`.
+1. `ssh deploy@<vps> 'ss -tlnp | grep :<port>'` — which process is listening
+2. `ssh deploy@<vps> 'docker ps --format "{{.Names}} {{.Ports}}"'` — possibly a new container
+3. If legitimate — add it to `docs/ports.md`
+4. If unknown — see `docs/runbooks/security-incident.md`
 
-### MISSING port (в docs/ports.md, но не слушает)
+A new private port (`127.0.0.1`) → less urgent, but still add it to `docs/ports.md`.
 
-Сервис упал или изменил порт:
-1. Проверить `docker ps` — контейнер running?
-2. Проверить `./verify.sh` — найдёт проблему
-3. Если сервис поменял порт — обновить `docs/ports.md`
+### MISSING port (in docs/ports.md but not listening)
+
+Service is down or moved port:
+
+1. Check `docker ps` — is the container running?
+2. Run `./verify.sh` — it will catch the same problem from another angle
+3. If the service moved port — update `docs/ports.md`
 
 ### UNSAFE BINDING
 
-Приватный сервис слушает на 0.0.0.0 вместо 127.0.0.1:
+A private service is listening on `0.0.0.0` instead of `127.0.0.1`:
 
 1. `ssh deploy@<vps> 'docker inspect <container> | grep -A5 PortBindings'`
-2. Исправить bind в docker-compose файле (зона владельца сервиса)
-3. Перезапустить: `docker compose up -d <service>`
-4. Повторно запустить port-audit для подтверждения
+2. Fix the bind in the application's `docker-compose.yml` (owner zone — coordinate)
+3. Restart: `docker compose up -d <service>`
+4. Re-run `port-audit` to confirm
 
-## Обновление docs/ports.md
+## Updating docs/ports.md
 
-После добавления нового сервиса:
-1. Узнать порт: `ssh deploy@<vps> 'docker inspect <container> | grep HostPort'`
-2. Добавить строку в правильную секцию (Public/Private)
-3. Запустить `./modules/port-audit/bin/port-audit` — должен показать 0 расхождений
+After adding a new service:
 
-## Зарезервированные диапазоны
+1. Find the port: `ssh deploy@<vps> 'docker inspect <container> | grep HostPort'`
+2. Add a row to the correct section (Public / Restricted / Private)
+3. Run `./modules/port-audit/bin/port-audit` — must report 0 discrepancies
 
-| Диапазон | Назначение |
-|---|---|
-| 8100–8199 | openclaw_firststeps — новые сервисы |
-| 9100–9199 | мониторинг (node_exporter и др.) |
-| 18000–18999 | openclaw internal |
-| 20000–20999 | AI routing / omniroute |
+## Reserved port ranges
 
-При добавлении нового сервиса выбирать порт из подходящего диапазона.
+See `docs/ports.md` for the canonical port-range conventions used in this deployment. When adding a new service, pick a port from the appropriate range.

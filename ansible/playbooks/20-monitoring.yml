@@ -1,26 +1,26 @@
 ---
 # Installs VPS health monitoring: Python poller + systemd timer (every 5 min).
 #
-# Requires in vault:
+# Required vault vars:
 #   vault_tg_infra_bot_token: "bot_token"
 #   vault_tg_infra_chat_id:   "-1001234567890"
-#   vault_tg_infra_topic_id:  "42"   # опц. — thread ID в группе
+#   vault_tg_infra_topic_id:  "42"   # optional — thread ID in a group
 #
 # Workflow:
-#   ansible-playbook playbooks/20-monitoring.yml --check     (dry-run)
-#   ansible-playbook playbooks/20-monitoring.yml             (install)
+#   ansible-playbook playbooks/20-monitoring.yml --check     # dry-run
+#   ansible-playbook playbooks/20-monitoring.yml             # install
 #
-# После установки — ручная проверка:
+# Manual check after install:
 #   ssh deploy@<vps> 'sudo python3 /usr/local/bin/vps-monitor.py --once'
 #
-# Тест Telegram:
+# Telegram test:
 #   ssh deploy@<vps> 'sudo python3 /usr/local/bin/vps-monitor.py --test-alert'
 #
-# Mac-side shortcut:
+# Control-machine shortcut:
 #   ./modules/monitoring/bin/run-check
 #   ./modules/monitoring/bin/run-check --test-alert
 #
-# Отключить timer:
+# Disable the timer:
 #   ssh deploy@<vps> 'sudo systemctl disable --now vps-monitor.timer'
 
 - name: "20 | VPS monitoring — install poller + timer"

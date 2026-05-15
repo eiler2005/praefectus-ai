@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
-# Read-only health gate. Запускает ansible/playbooks/99-verify.yml.
-# Никаких изменений на VPS, безопасно вызывать в любой момент.
+# Read-only health gate. Runs ansible/playbooks/99-verify.yml.
+# No mutations on the VPS — safe to call at any time.
 
 set -euo pipefail
 

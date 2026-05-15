@@ -1,5 +1,5 @@
 ---
-# Defaults для disk_audit. Перекрываются через group_vars/vps.yml или vault.
+# Defaults for disk_audit. Overridable via group_vars/vps.yml or vault.
 audit_paths:
   - /var/log
   - /var/lib/docker

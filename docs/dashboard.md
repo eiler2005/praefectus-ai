@@ -1,29 +1,12 @@
-# VPS dashboard — vps-prod
+# VPS dashboard
 
-> Updated: 2026-05-04 11:19 UTC
+> This file is **regenerated** by `./modules/dashboard/bin/update-dashboard`. Manual edits are overwritten on the next refresh.
+>
+> A sanitised sample of what this looks like in production lives at [`examples/sample-dashboard.md`](../examples/sample-dashboard.md).
 
 ## Status
 
-✅ **OK** — last check: `20260504T111847`
-
-| Metric | Value |
-|---|---|
-| Disk / | 73% |
-| RAM available | 2060 MB |
-| Load 5min | 0.54 |
-| Swap | 35% |
-
-## Recent events
-
-| Event | When | Detail |
-|---|---|---|
-| Last verify | 20260504T111847 | status=ok |
-| Last cleanup | 20260504T111811 | freed=5284M |
-| Last syncthing | (not run) | conflicts=? |
-
-## Trend (last 5 checks)
-
-`last 5: [W O]  disk: ↓ shrinking`
+(no data — run `./modules/dashboard/bin/update-dashboard`)
 
 ## Quick commands
 
@@ -37,9 +20,8 @@
 
 ## Links
 
-- [containers.md](containers.md) — все Docker контейнеры + mem limits
-- [ports.md](ports.md) — карта портов
-- [firewall.md](firewall.md) — UFW правила
-- [runbooks/maintenance-schedule.md](runbooks/maintenance-schedule.md) — расписание профилактики
-- [runbooks/health-rules.md](runbooks/health-rules.md) — правила OK/WARN/CRIT
-
+- [containers.md](containers.md) — container inventory and memory limits
+- [ports.md](ports.md) — port map
+- [firewall.md](firewall.md) — UFW rules
+- [runbooks/maintenance-schedule.md](runbooks/maintenance-schedule.md) — maintenance cadence
+- [runbooks/health-rules.md](runbooks/health-rules.md) — OK / WARN / CRIT rules

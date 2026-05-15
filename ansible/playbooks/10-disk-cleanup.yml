@@ -1,6 +1,6 @@
 ---
-# Освобождение места на диске. Использует raw module (pipelining-safe на этом VPS).
-# Безопасные операции (всегда с фильтрами по времени, volumes не трогаем):
+# Free disk space. Uses the raw module (pipelining-safe on this VPS).
+# Safe operations (every prune carries a time filter; volumes are never touched):
 #   - apt clean + autoremove
 #   - journalctl vacuum (14d / 500M)
 #   - docker container/image/builder prune --filter until=Nh
@@ -8,8 +8,8 @@
 #   - volumes NEVER touched
 #
 # Workflow:
-#   ansible-playbook playbooks/10-disk-cleanup.yml --check   (dry-run — показывает план)
-#   ansible-playbook playbooks/10-disk-cleanup.yml           (apply)
+#   ansible-playbook playbooks/10-disk-cleanup.yml --check   # dry-run, show plan
+#   ansible-playbook playbooks/10-disk-cleanup.yml           # apply
 
 - name: "10 | Disk cleanup — VPS"
   hosts: vps
@@ -25,7 +25,7 @@
     disk_crit_pct:        "{{ vault_disk_crit_pct        | default(90) }}"
 
   tasks:
-    # ---- AUDIT (всегда первым) ----
+    # ---- AUDIT (always first) ----
     - name: "10 | audit | df before"
       ansible.builtin.raw: "df -BM --output=target,size,used,avail,pcent /"
       register: df_before

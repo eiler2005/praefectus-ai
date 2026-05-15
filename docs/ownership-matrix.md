@@ -1,63 +1,61 @@
 # Ownership matrix
 
-Кто чем владеет на VPS. Перед любым mutating действием в чужой зоне — координация с владельцем.
+Who owns what on the VPS. Before any mutating action in another owner's zone, coordinate with that owner.
 
-## Системные пути
+This document is meant to be **forked and customised** for your deployment. The tables below show the maintainer's reference deployment as a template — replace the application rows with your own services.
 
-| Путь | Владелец | Что | Может ли vps_management менять |
+## System paths
+
+| Path | Owner | Purpose | Can PraefectusAI modify? |
 |---|---|---|---|
-| `/etc/ssh/` | vps_management | sshd_config + host keys | Да (через role с validate) |
-| `/etc/ufw/` | vps_management | firewall rules | Да |
-| `/etc/fail2ban/` | vps_management | jails | Да |
-| `/etc/systemd/system/` | vps_management | host-level units (мониторинг, бэкап) | Да для своих unit'ов |
-| `/etc/logrotate.d/vps-management` | vps_management | logrotate для caddy/nginx | Да |
-| `/etc/caddy/` | router_configuration | host Caddy L4 конфиг | **Нет** (только координация) |
-| `/etc/xray/` | router_configuration | Xray Reality конфиг | **Нет** |
-| `/etc/unbound/` | router_configuration | DNS resolver | **Нет** |
-| `/var/log/` | vps_management | system + service logs | Да (vacuum, rotate) |
-| `/var/lib/docker/` | vps_management (host-side) | docker storage | Да (prune с фильтрами!) |
-| `/var/cache/apt/` | vps_management | apt cache | Да (clean) |
-| `/home/deploy/.ssh/authorized_keys` | vps_management | SSH ключи доступа | Да |
-| `/home/deploy/.config/syncthing/` | vps_management | syncthing config | Да |
+| `/etc/ssh/` | PraefectusAI | sshd_config + host keys | Yes (via role with `validate: sshd -t -f %s`) |
+| `/etc/ufw/` | PraefectusAI | firewall rules | Yes |
+| `/etc/fail2ban/` | PraefectusAI | jails | Yes |
+| `/etc/systemd/system/` | PraefectusAI | host-level units (monitoring, backup) | Yes for own units only |
+| `/etc/logrotate.d/vps-management` | PraefectusAI | logrotate for system services | Yes |
+| `/etc/caddy/`, `/etc/nginx/` | application project (e.g. routing/proxy owner) | host reverse-proxy config | **No** (coordinate only) |
+| `/var/log/` | PraefectusAI | system + service logs | Yes (vacuum, rotate) |
+| `/var/lib/docker/` | PraefectusAI (host-side) | docker storage | Yes (`prune` with `--filter` only!) |
+| `/var/cache/apt/` | PraefectusAI | apt cache | Yes (clean) |
+| `/home/deploy/.ssh/authorized_keys` | PraefectusAI | SSH access keys | Yes |
+| `/home/deploy/.config/syncthing/` | PraefectusAI | syncthing config | Yes |
 
-## Application пути в `/opt/`
+## Application paths in `/opt/`
 
-| Путь | Владелец-проект | Что внутри | Деплоится через | vps_management override |
+Each application running on the VPS is an "owner" with its own deploy pipeline. Replace the rows below with your own apps.
+
+| Path | Owner project | What's inside | Deployed via | PraefectusAI override |
 |---|---|---|---|---|
-| `/opt/maxtg-bridge/` | [maxtg_bridge](../../maxtg_bridge/) | TG↔MAX bridge, sqlite, sessions | `infra/ansible/` оттуда | `docker-compose.override.local.yml` для mem_limit |
-| `/opt/openclaw/` | [openclaw_firststeps](../../openclaw_firststeps/) | gateway, workspace (md), config | `scripts/deploy-openclaw.sh` | mem_limit |
-| `/opt/lightrag/` | [openclaw_firststeps](../../openclaw_firststeps/) | KG + vector store | `scripts/deploy-lightrag.sh` | mem_limit (важно: prone to OOM) |
-| `/opt/omniroute/` | [openclaw_firststeps](../../openclaw_firststeps/) | router service на :20128 | `scripts/deploy-omniroute.sh` | mem_limit |
-| `/opt/telethon-digest/` | [openclaw_firststeps](../../openclaw_firststeps/) | telethon cron bridge | `scripts/deploy-telethon-digest.sh` | mem_limit |
-| `/opt/signals-bridge/` | [openclaw_firststeps](../../openclaw_firststeps/) | signals bridge :8093 | `scripts/deploy-signals-bridge.sh` | mem_limit |
-| `/opt/wiki-import/` | [openclaw_firststeps](../../openclaw_firststeps/) | wiki import :8095 | `scripts/deploy-wiki-import.sh` | mem_limit |
-| `/opt/agentmail-email/`, `/opt/agentmail-work-email/` | [openclaw_firststeps](../../openclaw_firststeps/) | mail bots | свои deploy скрипты | mem_limit |
-| `/opt/obsidian-vault/` | vps_management (Syncthing host) | синхронизируется с Mac (двусторонне!) | Syncthing | Да |
-| `/opt/stealth/` | router_configuration | конфиг stealth-routing (Xray side) | router_configuration ansible | **Нет** |
-| `/opt/ghostroute-health-monitor/` | router_configuration | live-check / deploy-risk скрипты | router_configuration ansible | **Нет** |
-| `/opt/ghostroute/backups/` | router_configuration | last-good бэкапы VPS-edge (caddy, ufw, stealth) | router_configuration `vps-last-good-backup.yml` | **Нет** |
+| `/opt/<app-1>/` | `<app-1-repo>` | bridge service, sqlite, sessions | application's own ansible | `docker-compose.override.local.yml` for `mem_limit` |
+| `/opt/<app-2>/` | `<app-2-repo>` | gateway, workspace, config | application's own deploy script | `mem_limit` |
+| `/opt/<app-3>/` | `<app-3-repo>` | KG + vector store (high OOM risk) | application's own deploy script | `mem_limit` (critical) |
+| `/opt/<app-4>/` | `<app-4-repo>` | router service | application's own deploy script | `mem_limit` |
+| `/opt/<routing-app>/` | `<routing-repo>` | stealth-routing config | routing project ansible | **No** |
+| `/opt/<obsidian-vault>/` | PraefectusAI (Syncthing host) | bidirectional sync with control machine | Syncthing | Yes |
 
-## Что значит "владелец"
+## What "owner" means
 
-- **Деплой и конфигурация:** все изменения в этой директории делает владелец через свой репо.
-- **Application secrets:** `.env.secrets`, `config.local.yaml` и т.п. — зона владельца.
-- **Образа docker:** какие версии, какие теги — зона владельца.
-- **Healthcheck endpoints:** какие пути отвечают, что они возвращают — владелец.
+- **Deploy and configuration** — every change in this directory is made by the owner via their own repo.
+- **Application secrets** — `.env.secrets`, `config.local.yaml`, etc. — owner's zone.
+- **Docker images** — which versions, which tags — owner.
+- **Healthcheck endpoints** — what paths respond and what they return — owner.
 
-## Что значит "vps_management override"
+## What "PraefectusAI override" means
 
-`vps_management` может (и должен) накладывать host-policy через `docker-compose.override.local.yml` рядом с основным compose-файлом. Этот файл:
-- Создаётся ансиблом (`60-docker-limits.yml`, планируется).
-- Не управляется владельцем приложения.
-- Содержит **только** host-level constraints: `mem_limit`, `cpus`, `restart`, `logging.driver`.
-- Не меняет сервисы, порты, env, volumes.
-- Подхватывается автоматически: `docker compose up` читает `docker-compose.yml + docker-compose.override.yml + docker-compose.override.local.yml`.
+PraefectusAI may (and should) impose host policy via `docker-compose.override.local.yml` next to the owner's main compose file. This file:
 
-Пример:
+- Is written by ansible (`60-docker-limits.yml`, `70-docker-limits-critical.yml`).
+- Is **not** managed by the application owner.
+- Contains **only** host-level constraints: `mem_limit`, `cpus`, `restart`, `logging.driver`.
+- Does not change services, ports, env, or volumes.
+- Is picked up automatically: `docker compose up` reads `docker-compose.yml + docker-compose.override.yml + docker-compose.override.local.yml`.
+
+Example:
+
 ```yaml
-# /opt/openclaw/docker-compose.override.local.yml — managed by vps_management
+# /opt/<app-name>/docker-compose.override.local.yml — managed by PraefectusAI
 services:
-  openclaw-gateway:
+  <service-name>:
     mem_limit: 512m
     cpus: 0.5
     restart: unless-stopped
@@ -66,11 +64,11 @@ services:
       options: { max-size: 10m, max-file: "3" }
 ```
 
-## Эскалация при инциденте
+## Incident escalation
 
-1. **vps_management алерт показывает container down в чужой зоне** → vps_management фиксирует факт + uptime + last logs в Telegram, **не** перезапускает.
-2. Уведомление владельцу (через Telegram канал или вручную).
-3. Владелец приходит в свой репо, разбирается, перезапускает.
-4. После recovery — `./verify.sh` со стороны vps_management должен показать ok.
+1. **PraefectusAI alert shows a container down in another owner's zone** → PraefectusAI records the fact + uptime + last logs in Telegram, but **does not** restart it.
+2. The application owner is notified (via Telegram channel or directly).
+3. The owner goes to their own repo, diagnoses, and restarts.
+4. After recovery, `./verify.sh` from PraefectusAI must show OK.
 
-Исключение: если контейнер падает циклически и сжирает диск логами — vps_management имеет право остановить (`docker stop <container>`) с уведомлением, чтобы не упал host. Никогда не делать `docker rm` или удалять данные.
+**Exception:** if a container is crash-looping and consuming disk via logs, PraefectusAI may stop the container (`docker stop <container>`) with a notification, to prevent the host from going down. Never run `docker rm` or remove data.

@@ -1,23 +1,24 @@
 ---
-# Устанавливает еженедельную автоматическую чистку на VPS.
-# Создаёт /usr/local/bin/vps-periodic-cleanup.sh + systemd timer (weekly, воскресенье 03:00 UTC).
+# Installs the weekly automatic cleanup on the VPS.
+# Creates /usr/local/bin/vps-periodic-cleanup.sh + systemd timer (Sun 03:00 UTC).
 #
-# Безопасные операции (те же фильтры что и в 10-disk-cleanup.yml):
+# Safe operations (same filters as 10-disk-cleanup.yml):
 #   - apt clean
 #   - journalctl vacuum (14d / 500M)
 #   - docker container/image/builder prune --filter until=Nh
-#   - volumes НЕ трогаем
+#   - volumes are NEVER touched
 #
 # Workflow:
-#   ansible-playbook playbooks/11-periodic-cleanup-setup.yml --check   (dry-run)
-#   ansible-playbook playbooks/11-periodic-cleanup-setup.yml           (apply)
+#   ansible-playbook playbooks/11-periodic-cleanup-setup.yml --check   # dry-run
+#   ansible-playbook playbooks/11-periodic-cleanup-setup.yml           # apply
 #
-# После установки проверить:
-#   ssh deploy@<vps> systemctl status vps-cleanup.timer
-#   ssh deploy@<vps> systemctl list-timers vps-cleanup.timer
+# After install, verify:
+#   ssh deploy@<vps> 'systemctl status vps-cleanup.timer'
+#   ssh deploy@<vps> 'systemctl list-timers vps-cleanup.timer'
+#
 # Legacy note:
 #   vps-weekly-cleanup.timer was an older duplicate timer. This playbook
-#   disables/removes it so only vps-cleanup.timer remains canonical.
+#   disables / removes it so only vps-cleanup.timer remains canonical.
 
 - name: "11 | Periodic cleanup setup — install weekly cleanup timer"
   hosts: vps

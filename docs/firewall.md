@@ -1,13 +1,12 @@
-# Firewall rules — vps-prod (UFW)
+# Firewall rules — UFW
 
-Актуальное состояние UFW firewall. Обновлять при изменении правил.
+Current state of the UFW firewall. Update when rules change.
 
-**Последний аудит:** 2026-05-06  
-**Управляется:** `router_configuration` (caddy/xray/console) + `vps_management` (ssh, syncthing)
+> Real IPs live in `vault.yml`. This document uses placeholders.
 
 ---
 
-## Текущие правила
+## Current rules (template / example)
 
 ```
 # sudo ufw status numbered
@@ -15,22 +14,22 @@ Status: active
 
      To                         Action      From
      --                         ------      ----
-[ 1] 22/tcp                     ALLOW IN    <denis-home-ip>            # SSH from Denis home
+[ 1] 22/tcp                     ALLOW IN    <operator-home-ip>         # SSH from operator home
 [ 2] 22/tcp                     ALLOW IN    <work-ip>                  # SSH from work
 [ 3] 80/tcp                     ALLOW IN    Anywhere                   # HTTP for ACME
-[ 4] 443/tcp                    ALLOW IN    Anywhere
+[ 4] 443/tcp                    ALLOW IN    Anywhere                   # HTTPS
 [ 5] 22000/tcp                  ALLOW IN    Anywhere                   # Syncthing data TCP
 [ 6] 22000/udp                  ALLOW IN    Anywhere                   # Syncthing data QUIC
 [ 7] 21027/udp                  ALLOW IN    Anywhere                   # Syncthing discovery
-[ 8] 22/tcp                     ALLOW IN    <denis-home-ip-2>          # SSH from Denis (alt)
-[ 9] 22/tcp                     ALLOW IN    <trusted-ip-1>             # allow ssh trusted
+[ 8] 22/tcp                     ALLOW IN    <operator-home-ip-2>       # SSH from operator (alt)
+[ 9] 22/tcp                     ALLOW IN    <trusted-ip-1>             # additional trusted SSH
 [10] 22/tcp                     ALLOW IN    <trusted-ip-2>
-[11] 53/tcp                     DENY IN     Anywhere
+[11] 53/tcp                     DENY IN     Anywhere                   # block public DNS
 [12] 53/udp                     DENY IN     Anywhere
-[13] 22/tcp                     ALLOW IN    <ghostroute-control-ip>    # GhostRoute current control SSH
-[14] 15353/tcp                  ALLOW IN    172.22.0.0/16              # GhostRoute Xray bridge to Unbound
-[15] 15353/udp                  ALLOW IN    172.22.0.0/16              # GhostRoute Xray bridge to Unbound
-[16] 2087/tcp                   ALLOW IN    Anywhere                   # GhostRoute Console HTTPS
+[13] 22/tcp                     ALLOW IN    <bastion-ip>               # bastion SSH
+[14] 15353/tcp                  ALLOW IN    172.22.0.0/16              # internal resolver from Docker bridge
+[15] 15353/udp                  ALLOW IN    172.22.0.0/16
+[16] 2087/tcp                   ALLOW IN    Anywhere                   # admin console HTTPS (Caddy front)
 [17] 443/tcp                    ALLOW OUT   Anywhere                   (out)
 [18] 53                         ALLOW OUT   Anywhere                   (out)
 [19] 80/tcp (v6)                ALLOW IN    Anywhere (v6)              # HTTP for ACME
@@ -40,82 +39,70 @@ Status: active
 [23] 21027/udp (v6)             ALLOW IN    Anywhere (v6)              # Syncthing discovery
 [24] 53/tcp (v6)                DENY IN     Anywhere (v6)
 [25] 53/udp (v6)                DENY IN     Anywhere (v6)
-[26] 2087/tcp (v6)              ALLOW IN    Anywhere (v6)              # GhostRoute Console HTTPS
+[26] 2087/tcp (v6)              ALLOW IN    Anywhere (v6)              # admin console HTTPS
 [27] 443/tcp                    ALLOW OUT   Anywhere (v6)              (out)
 [28] 53 (v6)                    ALLOW OUT   Anywhere (v6)              (out)
 ```
 
-Реальные IP-адреса хранятся в vault.yml, в docs используются плейсхолдеры.
-
 ---
 
-## Обоснование правил
+## Rationale
 
-| Порт | Протокол | Причина открытия | Владелец |
+| Port | Protocol | Why open | Owner |
 |---|---|---|---|
-| 22 | TCP | SSH-доступ с разрешённых IP (несколько правил) | vps_management |
-| 80 | TCP | HTTP → HTTPS redirect, ACME challenge (Caddy) | router_configuration |
-| 443 | TCP | HTTPS + Xray Reality (Caddy + stealth VPN) | router_configuration |
-| 2087 | TCP | GhostRoute Console HTTPS (внешний доступ) | router_configuration |
-| 21027 | UDP | Syncthing discovery protocol | vps_management |
-| 22000 | TCP+UDP | Syncthing peer sync (Mac ↔ VPS) | vps_management |
-| 53 | TCP+UDP | **DENY IN** — VPS не должен быть публичным DNS | vps_management |
-| 15353 | TCP+UDP | Unbound resolver — только из Xray Docker bridge (172.22.0.0/16). **Опционально** с 2026-05-06: основной путь managed DNS перенесён на dnscrypt-proxy на роутере | router_configuration |
-| 443, 53 | OUT | Исходящие HTTPS и DNS — нужны для apt, restic B2, ACME | vps_management |
+| 22 | TCP | SSH from allowlisted IPs (multiple rules) | PraefectusAI |
+| 80 | TCP | HTTP → HTTPS redirect, ACME challenge | application owner (reverse proxy) |
+| 443 | TCP | HTTPS + multiplexed protocols on 443 | application owner |
+| 2087 | TCP | Admin console HTTPS (front-ended by reverse proxy) | application owner |
+| 21027 | UDP | Syncthing discovery protocol | PraefectusAI |
+| 22000 | TCP+UDP | Syncthing peer sync (control machine ↔ VPS) | PraefectusAI |
+| 53 | TCP+UDP | **DENY IN** — VPS must never serve as a public DNS resolver | PraefectusAI |
+| 15353 | TCP+UDP | Internal DNS resolver — only reachable from a defined Docker bridge | application owner |
+| 443, 53 | OUT | Outbound HTTPS and DNS — needed for apt, restic backups, ACME | PraefectusAI |
 
-**Всё остальное — DROP** (UFW default deny incoming).
-
----
-
-> **Изменение 2026-05-06 (router_configuration f773f17):**  
-> Правила 14–15 (порт 15353, Unbound) теперь **опциональны**. Основной managed DNS  
-> перемещён на dnscrypt-proxy→sing-box→Reality на роутере. VPS Unbound включается  
-> только для приватной диагностики. Правила UFW остаются на месте.
+**Everything else — DROP** (UFW default deny incoming).
 
 ---
 
-## Что НЕ открыто через UFW (намеренно)
+## What's intentionally **not** open via UFW
 
-| Порт | Сервис | Почему закрыт |
+| Port | Service | Why closed |
 |---|---|---|
-| 8384 | Syncthing Web UI | Только 127.0.0.1, доступ через SSH tunnel |
-| 9100 | node_exporter (будущее) | Только 127.0.0.1 |
-| 18789, 8020, 20128–20129 | openclaw stack | Только 127.0.0.1, внутренние API |
-| 3000 | ghostroute-console internal | Только 127.0.0.1 (внешний — 2087 через Caddy) |
+| 8384 | Syncthing Web UI | `127.0.0.1` only; access via SSH tunnel |
+| 9100 | `node_exporter` (future) | `127.0.0.1` only |
+| Application APIs | each application's HTTP/RPC | `127.0.0.1` only; routed via reverse proxy if exposed |
 
 ---
 
-## Управление UFW
+## Managing UFW
 
 ```bash
-# Просмотр правил
+# View rules
 ssh deploy@<vps> 'sudo ufw status numbered'
 
-# Проверить что UFW active
+# Verify UFW is active
 ssh deploy@<vps> 'sudo ufw status | head -1'
 
-# ОСТОРОЖНО: ufw disable закрывает SSH если нет rescue!
-# Никогда не выполнять без консоли Hetzner в запасе.
+# DANGER: ufw disable closes SSH if you have no rescue path!
+# Never run without a working rescue (provider console, bastion).
 ```
 
 ### SSH allowlist and VPN changes
 
-SSH is allowlisted by source IP. If the operator switches to a third-party VPN,
-mobile hotspot, office network, or any other route with a new egress IP, direct
-SSH may fail even when the VPS is healthy. Before depending on that route:
+SSH is allowlisted by source IP. If the operator switches to a third-party VPN, mobile hotspot, office network, or any other route with a new egress IP, direct SSH may fail even when the VPS is healthy. Before depending on a new route:
 
-1. Add the new source IP to the VPS SSH allowlist and any provider firewall
-   allowlist.
+1. Add the new source IP to the VPS SSH allowlist and any provider firewall allowlist.
 2. Verify direct SSH from that network: `./ansible/scripts/ssh-vps.sh 'echo OK'`.
-3. Keep the router bastion or Hetzner Console available before changing rules.
+3. Keep a rescue path available before changing rules — bastion, provider console (e.g. Hetzner Cloud Console / AWS EC2 Console / DigitalOcean web terminal).
 
 Never replace the SSH allowlist with `Anywhere` as a convenience shortcut.
 
 ---
 
-## Аварийный доступ
+## Emergency access
 
-Если UFW заблокировал SSH:
-1. Зайти через Hetzner Cloud Console (web-based terminal)
-2. `sudo ufw disable` → получить SSH доступ
-3. Восстановить правила с проверкой: `sudo ufw allow 22/tcp && sudo ufw enable`
+If UFW has locked you out of SSH:
+
+1. Open the provider's web console (e.g. Hetzner Cloud Console, AWS EC2 Console, DigitalOcean web terminal).
+2. `sudo ufw disable` → SSH access is restored.
+3. Re-add the rule that was missing, then re-enable: `sudo ufw allow 22/tcp && sudo ufw enable`.

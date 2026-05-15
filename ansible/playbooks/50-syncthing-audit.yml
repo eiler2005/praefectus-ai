@@ -1,14 +1,14 @@
 ---
-# Syncthing audit: конфликты, подключение Mac, файлы > 100MB, использование пространства.
+# Syncthing audit: conflicts, peer connection, files > 100 MB, disk usage.
 #
-# Читает SYNCTHING_API_KEY из vault (vault_syncthing_api_key).
-# Если ключ не задан — API-проверка пропускается, filesystem audit запускается.
+# Reads SYNCTHING_API_KEY from vault (vault_syncthing_api_key).
+# If the key is not set, the API check is skipped; the filesystem audit still runs.
 #
 # Workflow:
-#   ansible-playbook playbooks/50-syncthing-audit.yml --check   (синтаксис)
-#   ansible-playbook playbooks/50-syncthing-audit.yml           (запустить аудит)
+#   ansible-playbook playbooks/50-syncthing-audit.yml --check   # syntax / dry-run
+#   ansible-playbook playbooks/50-syncthing-audit.yml           # run audit
 #
-# Отчёт сохраняется в reports/syncthing-audit-<timestamp>.md
+# Report is written to reports/syncthing-audit-<timestamp>.md
 
 - name: "50 | Syncthing audit — vps-prod"
   hosts: vps
@@ -77,7 +77,7 @@
       changed_when: false
       check_mode: false
 
-    # ---- SYNCTHING API (если API ключ задан) ----
+    # ---- SYNCTHING API (only when api key is set) ----
     - name: "50 | api | ping syncthing"
       ansible.builtin.raw: |
         curl -sS --max-time 5 \
@@ -136,7 +136,7 @@
 
           ## Obsidian vault
 
-          | Метрика | Значение |
+          | Metric | Value |
           |---|---|
           | Total size | {{ vault_size.stdout | trim }} |
           | Path | {{ obsidian_vault_path }} |

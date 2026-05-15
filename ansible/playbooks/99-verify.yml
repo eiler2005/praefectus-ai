@@ -1,7 +1,7 @@
 ---
-# Read-only health gate. Никаких изменений.
-# Использует raw module (работает с pipelining на этом VPS).
-# Все проверки: disk, mem, load, docker daemon, containers, ufw, app dirs.
+# Read-only health gate. No mutations.
+# Uses the raw module (works with pipelining on this VPS).
+# Checks: disk, mem, load, docker daemon, containers, ufw, app dirs.
 
 - name: "99 | Verify — read-only health checks"
   hosts: vps

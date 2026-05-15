@@ -1,12 +1,14 @@
 ---
 # Restic backups to Backblaze B2.
-# Backs up: /opt/maxtg-bridge/data, /opt/openclaw/workspace, /opt/obsidian-vault/wiki
+# Backs up the application data paths configured via vault_backup_paths
+# (defaults to /opt/<app>/data and /opt/<sync-vault>).
 #
 # Required vault vars:
 #   vault_b2_key_id       — Backblaze B2 application key ID
 #   vault_b2_app_key      — Backblaze B2 application key
-#   vault_b2_bucket       — B2 bucket name (e.g. vps-hetz23-prod-backups)
+#   vault_b2_bucket       — B2 bucket name (e.g. <project>-prod-backups)
 #   vault_restic_password — restic repo encryption password (generate: pwgen -s 32 1)
+#   vault_backup_paths    — list of paths to back up (optional, has defaults)
 #
 # Workflow:
 #   ansible-playbook playbooks/30-backup.yml --check --diff        # dry-run (setup steps)

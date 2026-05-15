@@ -1,22 +1,22 @@
 ---
 # Security hardening: fail2ban, unattended-upgrades, sshd_baseline, UFW audit.
 #
-# БЕЗОПАСНЫЕ операции (не ломают доступ при корректном выполнении):
-#   - fail2ban: sshd jail (блокирует брутфорс, whitelist в vault)
-#   - unattended-upgrades: только -security патчи, без reboot
-#   - sshd_baseline: проверка + enforce MaxSessions, без изменения auth-параметров
-#   - UFW audit: документировать правила (без изменений)
-#   - SSH authorized_keys: показать список
+# Safe operations (do not break access when applied correctly):
+#   - fail2ban: sshd jail (rate-limits brute force; allowlist in vault)
+#   - unattended-upgrades: -security patches only, no automatic reboot
+#   - sshd_baseline: validate + enforce MaxSessions; auth params untouched
+#   - UFW audit: document the rules (no changes applied)
+#   - SSH authorized_keys: dump current list
 #
-# ПОРЯДОК:
-#   ansible-playbook playbooks/40-security.yml --check   (dry-run, показывает план)
-#   ansible-playbook playbooks/40-security.yml           (apply)
+# Workflow:
+#   ansible-playbook playbooks/40-security.yml --check   # dry-run, show plan
+#   ansible-playbook playbooks/40-security.yml           # apply
 #
-# После apply обязательно:
-#   ./verify.sh   — убедиться что SSH всё ещё работает
+# After apply, run:
+#   ./verify.sh   # confirm SSH still works
 #
-# Whitelist доверенных IP (не блокировать fail2ban):
-#   vault_fail2ban_trusted_ips: ["192.168.1.0/24"]  в vault.yml
+# Allowlist for fail2ban (skip these IPs):
+#   vault_fail2ban_trusted_ips: ["192.168.1.0/24"]  in vault.yml
 
 - name: "40 | Security hardening — vps-prod"
   hosts: vps
@@ -30,7 +30,7 @@
     ssh_max_sessions: 6
 
   tasks:
-    # ======== AUDIT (всегда первым, read-only) ========
+    # ======== AUDIT (always first, read-only) ========
     - name: "40 | audit | ufw rules"
       ansible.builtin.raw: "sudo ufw status numbered 2>/dev/null || echo 'ufw not installed'"
       register: ufw_status

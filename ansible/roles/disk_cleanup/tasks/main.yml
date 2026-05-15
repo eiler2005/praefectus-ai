@@ -1,9 +1,9 @@
 ---
-# Безопасная чистка диска. Принципы:
-# - Все docker prune команды имеют --filter "until=Nh"
-# - Volumes никогда не удаляются автоматически
-# - Application data в /opt/<app>/{data,workspace} не трогается
-# - Каждый шаг идемпотентный, --check-friendly
+# Safe disk cleanup. Principles:
+# - Every docker prune carries --filter "until=Nh"
+# - Volumes are NEVER pruned automatically
+# - Application data in /opt/<app>/{data,workspace} is left alone
+# - Every step is idempotent and --check-friendly
 
 - name: "cleanup | safety check — disk not in critical state"
   ansible.builtin.fail:

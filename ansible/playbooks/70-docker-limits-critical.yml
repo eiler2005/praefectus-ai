@@ -1,30 +1,24 @@
 ---
-# Устанавливает memory limits для критичных сервисов OpenClaw stack.
+# Applies memory limits to critical containers.
 #
-# Применяет лимиты ДВУМЯ способами:
-#   1. docker-compose.override.local.yml — персистентный (активируется при следующем compose up)
-#   2. docker update — немедленно, без перезапуска сервисов
+# Uses TWO mechanisms:
+#   1. docker-compose.override.local.yml — persistent (active on next compose up)
+#   2. docker update --memory      — immediate (no restart needed)
 #
-# Не трогаем (чужие зоны):
-#   - xray, xray-xhttp, ghostroute-console (router_configuration)
-#   - deploy-bridge-1 (maxtg_bridge, лимит уже в prod compose)
+# Out of scope (other owners' zones):
+#   - routing-side containers managed by the routing project
+#   - application containers whose limit is already set in their own prod compose
 #
-# ВНИМАНИЕ при ручном перезапуске openclaw:
-#   Указывать сервисы явно — в docker-compose.override.yml есть telethon-digest,
-#   который НЕ должен запускаться отсюда (живёт в /opt/telethon-digest/).
+# When restarting the affected stack manually:
+#   List services explicitly. Some compose files contain auxiliary services
+#   (e.g. cron bridges) that should NOT be started from this directory.
 #
-# Restart commands (выполнять вручную после проверки):
-#   cd /opt/openclaw && sudo docker compose \
+# Restart commands (run manually after verification):
+#   cd /opt/<app> && sudo docker compose \
 #     -f docker-compose.yml -f docker-compose.override.yml -f docker-compose.override.local.yml \
-#     up -d openclaw-gateway omniroute
-#   cd /opt/lightrag && sudo docker compose \
-#     -f docker-compose.yml -f docker-compose.override.yml -f docker-compose.override.local.yml \
-#     up -d
-#   cd /opt/integration-bus && sudo docker compose \
-#     -f docker-compose.yml -f docker-compose.override.local.yml \
-#     up -d
+#     up -d <service-1> <service-2>
 
-- name: "70 | Docker memory limits — критичные сервисы (Этап 3)"
+- name: "70 | Docker memory limits — critical services"
   hosts: vps
   gather_facts: false
 
@@ -36,7 +30,7 @@
 
   tasks:
     # ---- AUDIT ----
-    - name: "70 | audit | текущее потребление RAM"
+    - name: "70 | audit | current RAM usage"
       ansible.builtin.raw: !unsafe |
         docker stats --no-stream --format \
           "table {{.Name}}\t{{.MemUsage}}\t{{.MemPerc}}" 2>/dev/null
@@ -50,13 +44,13 @@
 
     # ---- OVERRIDE FILES ----
 
-    # openclaw project: gateway + omniroute (один файл для обоих)
+    # gateway + router-service in the same /opt/<app>/ — both go in one override file
     - name: "70 | limits | openclaw-gateway ({{ mem_openclaw_gateway }}) + omniroute ({{ mem_omniroute }})"
       ansible.builtin.raw: |
         sudo tee /opt/openclaw/docker-compose.override.local.yml > /dev/null << 'EOF'
         # Managed by vps_management — host-level memory constraints only.
         # Do NOT edit service definitions here.
-        # Restart (ТОЛЬКО gateway + omniroute, не telethon-digest):
+        # Restart ONLY the listed services (some compose files include unrelated services):
         #   cd /opt/openclaw && sudo docker compose \
         #     -f docker-compose.yml -f docker-compose.override.yml -f docker-compose.override.local.yml \
         #     up -d openclaw-gateway omniroute
@@ -109,7 +103,7 @@
       changed_when: "'CHANGED' in r_redis.stdout"
 
     # ---- APPLY IMMEDIATELY VIA docker update (no restart) ----
-    - name: "70 | apply | docker update — лимиты без перезапуска"
+    - name: "70 | apply | docker update — apply limits without restart"
       ansible.builtin.raw: |
         sudo docker update \
           --memory={{ mem_openclaw_gateway }} \
@@ -135,7 +129,7 @@
         msg: "{{ r_update.stdout_lines | default(['(skipped in check mode)']) }}"
 
     # ---- VERIFY ----
-    - name: "70 | verify | текущие лимиты (docker inspect)"
+    - name: "70 | verify | current limits (docker inspect)"
       ansible.builtin.raw: |
         docker inspect openclaw-openclaw-gateway-1 omniroute lightrag-lightrag-1 integration-bus-redis 2>/dev/null | python3 -c "
         import json,sys
@@ -154,7 +148,7 @@
       ansible.builtin.debug:
         msg: "{{ r_verify.stdout_lines | default(['(skipped in check mode)']) }}"
 
-    - name: "70 | verify | свободная RAM после применения лимитов"
+    - name: "70 | verify | free RAM after applying limits"
       ansible.builtin.raw: |
         free -m | awk 'NR==2{printf "RAM: used=%sMB avail=%sMB\n",$3,$7}'
         free -m | awk 'NR==3{printf "Swap: used=%sMB free=%sMB\n",$3,$4}'
@@ -170,30 +164,30 @@
       ansible.builtin.debug:
         msg:
           - "================================================="
-          - "DOCKER LIMITS CRITICAL SUMMARY (Этап 3)"
+          - "DOCKER LIMITS CRITICAL SUMMARY"
           - "================================================="
           - "openclaw-gateway:   {{ mem_openclaw_gateway }}  (override: {{ r_openclaw.changed }}, update: applied)"
           - "omniroute:          {{ mem_omniroute }}   (override: {{ r_openclaw.changed }}, update: applied)"
           - "lightrag:           {{ mem_lightrag }}   (override: {{ r_lightrag.changed }}, update: applied)"
           - "redis:              {{ mem_redis }}   (override: {{ r_redis.changed }}, update: applied)"
           - "================================================="
-          - "Лимиты применены НЕМЕДЛЕННО через docker update (без перезапуска)."
-          - "Override-файлы созданы для персистентности при следующем compose up."
+          - "Limits applied IMMEDIATELY via docker update (no restart)."
+          - "Override files written for persistence on the next compose up."
           - "================================================="
-          - "НЕ затронуты (чужие зоны / другой этап):"
-          - "  xray, xray-xhttp, ghostroute-console (router_configuration)"
-          - "  deploy-bridge-1 (maxtg_bridge, лимит в prod compose)"
+          - "NOT touched (other-owner zones):"
+          - "  routing-side containers (owned by routing project)"
+          - "  bridge-service (limit already set in its own prod compose)"
           - "================================================="
-          - "Память бюджет (3819MB RAM):"
-          - "  openclaw-gateway:   {{ mem_openclaw_gateway }}"
-          - "  omniroute:          {{ mem_omniroute }}"
-          - "  lightrag:           {{ mem_lightrag }}"
-          - "  redis:              {{ mem_redis }}"
-          - "  Этап 2 (5 сервисов): 1664MB"
-          - "  deploy-bridge-1:     256MB"
-          - "  router zone (est):   ~360MB (без лимита)"
+          - "Memory budget (~3.8 GB RAM available):"
+          - "  critical-gateway:    {{ mem_openclaw_gateway }}"
+          - "  router-service:      {{ mem_omniroute }}"
+          - "  knowledge-graph:     {{ mem_lightrag }}"
+          - "  integration-bus:     {{ mem_redis }}"
+          - "  60-* (5 services):   ~1664MB"
+          - "  bridge-service:      256MB"
+          - "  routing zone (est):  ~360MB (no limit)"
           - "  OS + kernel (est):   ~350MB"
           - "================================================="
-          - "При выходе одного сервиса за лимит — остальные защищены."
-          - "Проверить: ansible-playbook playbooks/99-verify.yml"
+          - "When one service exceeds its limit, the others remain protected."
+          - "Verify: ansible-playbook playbooks/99-verify.yml"
           - "================================================="

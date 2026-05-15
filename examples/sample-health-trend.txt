@@ -1,0 +1,40 @@
+$ ./modules/health-trends/bin/health-trend --last 10
+
+PraefectusAI health trend — last 10 reports
+============================================
+Window: 2026-05-04T11:18Z .. 2026-05-12T06:34Z
+
+Overall status sequence (oldest → newest):
+  [O O W W O O O O W O]
+  O = OK   W = WARN   F = FAIL
+
+Disk usage (% of /):
+  73 → 78 → 80 → 80 → 73 → 71 → 70 → 70 → 80 → 71
+  trend (linear fit, 7-pt): -0.4 %/report   ↓ shrinking
+  trigger to watch: ≥ 80 % (WARN), ≥ 90 % (CRIT)
+
+Memory available (MB):
+  2060 → 2018 → 1897 → 1955 → 2103 → 2120 → 2090 → 2074 → 1897 → 2091
+  trend: stable around 2.0 GB
+  trigger: < 500 MB (WARN), < 200 MB (CRIT)
+
+Swap usage (%):
+  35 → 56 → 91 → 88 → 41 → 30 → 28 → 32 → 91 → 40
+  trend: spike pattern correlates with disk WARN windows
+  trigger: ≥ 40 % (WARN), ≥ 80 % (CRIT)
+
+Load average (5 min):
+  0.54 → 0.91 → 2.02 → 1.83 → 0.62 → 0.51 → 0.48 → 0.54 → 2.05 → 0.61
+  trend: occasional 2.0+ spikes — investigate post-cleanup load profile
+  trigger: 2.0+ (WARN), 4.0+ (CRIT)
+
+Containers with RestartCount > 0:
+  <critical-gateway>: 27 restarts (note: known issue, owner=app-2 project)
+
+Memory pressure candidates (>80 % of mem_limit):
+  none in window
+
+Recommendation:
+  - Disk trending down after recent cleanup — continue weekly timer.
+  - Swap WARN correlates with peak load. Review <critical-gateway> mem_limit
+    (currently 1224 m); see docs/journal/2026-05.md for rationale.

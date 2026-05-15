@@ -1,26 +1,50 @@
-# Vault password — никогда не должен попасть в git
+# PraefectusAI .gitignore
+
+# ---- Vault password — must never reach git ----
 .vault_pass.txt
 .vault_pass*
 !.vault_pass.example
 
-# Local secrets (fallback) — основное место хранения = ansible/secrets/vault.yml (encrypted)
+# ---- Private keys of every flavour ----
+*.pem
+*.key
+*.pub
+id_rsa*
+id_ed25519*
+id_ecdsa*
+id_dsa*
+*.ppk
+authorized_keys
+known_hosts
+
+# ---- WireGuard / OpenVPN configs that may carry keys ----
+*.conf.wg
+wg*.conf
+*.ovpn
+
+# ---- Local secrets fallback ----
+# (Canonical store is ansible/secrets/vault.yml, encrypted)
 /secrets/*
 !/secrets/.gitkeep
 
-# Local-only verify/audit reports
+# ---- Local-only verify / audit reports ----
 /reports/*
 !/reports/.gitkeep
 
-# Ansible artifacts
+# ---- Ansible artefacts ----
 ansible/*.retry
 ansible/collections/
 ansible/.cache/
 ansible/secrets/*.backup-*
 
-# Inventory с реальными значениями (используем только vault-driven inventory)
+# Plaintext vault.yml (must always be encrypted in git)
+ansible/secrets/vault.yml
+!ansible/secrets/vault.yml.example
+
+# Local-override inventories
 ansible/inventory/*.local.yml
 
-# IDE / OS
+# ---- IDE / OS / agent state ----
 .DS_Store
 .vscode/
 .idea/
@@ -28,8 +52,16 @@ ansible/inventory/*.local.yml
 *~
 .claude/
 
-# Python (если появятся скрипты)
+# ---- Python ----
 __pycache__/
 *.pyc
 .venv/
 venv/
+.pytest_cache/
+
+# ---- Pre-commit ----
+.pre-commit-cache/
+
+# ---- Local plan / scratch files ----
+plans/
+*.scratch

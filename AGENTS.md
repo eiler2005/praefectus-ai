@@ -1,123 +1,141 @@
-# Agent Instructions — vps_management
+# Agent Instructions — PraefectusAI
 
-Shared rules for any agent (Codex, Claude Code, others) working in this repository.
+Shared rules for any agent (Codex, Claude Code, Cursor, others) working in this repository.
 
 ## Project Snapshot
 
-`vps_management` — централизованный оркестратор для одного Hetzner CX23 VPS (Ubuntu 24.04, 4GB RAM, 2 vCPU, 40GB диск, deploy@22).
+**PraefectusAI** is a framework for AI-augmented administration of Linux VPS hosts running Dockerised application workloads. It packages production patterns as a structured knowledge base an LLM agent can consume safely:
 
-**Что мы владеем (host layer):**
-- OS пакеты, ядро, sysctl
-- `/etc/{ssh,ufw,fail2ban}` (системная безопасность)
-- `/var/log`, `/var/lib/docker` (системная чистка)
-- `/home/deploy/.ssh`, `/home/deploy/.config/syncthing`
-- Docker daemon (но НЕ application docker-compose файлы)
-- Мониторинг здоровья сервера, бэкапы host-уровня, секреты доступа
+- **Deterministic actions** — Ansible playbooks (mutating + read-only `99-verify`)
+- **Decision trees** — markdown runbooks (`docs/runbooks/*.md`)
+- **Agent skills** — standalone CLI modules (`modules/*/bin/`)
+- **Memory** — structured reports (`reports/health/*.json`) + manual journal (`docs/journal/`)
+- **Guardrails** — Ansible Vault + secret-scan + ownership matrix + read-only by default
 
-**Что мы НЕ владеем (application layer):**
-- `/opt/maxtg-bridge/` — владелец [`maxtg_bridge`](../maxtg_bridge/)
-- `/opt/openclaw/`, `/opt/lightrag/`, `/opt/omniroute/`, `/opt/{telethon-digest,signals-bridge,wiki-import,agentmail-*}/` — владелец [`openclaw_firststeps`](../openclaw_firststeps/)
-- `/etc/{caddy,xray,unbound}/` — владелец [`router_configuration`](../router_configuration/)
-- Любые `docker-compose.yml` в `/opt/<app>/` — это файлы-владельцы чужих репо
+Target host model: any Linux VPS with SSH + Docker. Reference deployment is a single Hetzner CX23 (Ubuntu 24.04, 4 GB RAM, 2 vCPU, 40 GB disk, `deploy@22`), but patterns scale to small fleets without structural change.
 
-Полная карта владения — [`docs/ownership-matrix.md`](docs/ownership-matrix.md).
+### What this repo owns (host layer)
 
-**Источник истины для VPS access** — `ansible/secrets/vault.yml` (ansible-vault encrypted). Никаких реальных IP/SSH/токенов в коммитах вне vault.
+- OS packages, kernel, sysctl
+- `/etc/{ssh,ufw,fail2ban}` (host security)
+- `/var/log`, `/var/lib/docker` (system cleanup)
+- `deploy` user home (`~/.ssh`, `~/.config/*`)
+- Docker daemon (but **not** application `docker-compose.yml` files)
+- Host-level monitoring, backups, access secrets
+
+### What this repo does **not** own (application layer)
+
+- Application directories in `/opt/<app>/` are owned by the projects that deploy them
+- Application `docker-compose.yml` files are deployed by the application owner, not by this repo
+- Application-managed system paths (e.g. `/etc/caddy/` if a routing project owns the reverse proxy) belong to their owner
+
+Full ownership map → [`docs/ownership-matrix.md`](docs/ownership-matrix.md).
+
+**Source of truth for VPS access** — `ansible/secrets/vault.yml` (ansible-vault encrypted). No real IPs, SSH credentials or tokens live in tracked files outside the vault.
 
 ---
 
 ## Karpathy-Style Agent Workflow
 
-LLM-агенты часто ошибаются на ровном месте — следуй этим правилам, чтобы не терять время на регрессии.
+LLM agents make avoidable mistakes when they skip context. Follow these rules to stay productive and not introduce regressions.
 
-1. **Думай перед действием.** Прочитай задачу, прочитай AGENTS.md, прочитай нужные docs/runbooks/. Не открывай редактор пока не понял что и зачем.
-2. **Читай документацию первым.** Перед изменением плейбука/роли — прочитай `docs/architecture.md` и соответствующий runbook. Перед трогением `/opt/<app>` — обязательно `docs/ownership-matrix.md`.
-3. **Минимальные изменения.** Один тикет — одна правка. Не рефакторь "заодно". Не добавляй фичи которые не просили.
-4. **Хирургические edits.** Меняй только нужные файлы. Не переформатируй чужие. Не "улучшай" комментарии.
-5. **Соответствуй стилю проекта.** YAML с двухпробельным отступом, bash с `set -euo pipefail`, имена ролей в `snake_case`, плейбуки в `kebab-case` с числовым префиксом.
-6. **Сохраняй работу пользователя.** Если в репо есть незафиксированные изменения — НЕ запускай `git checkout`/`reset`/`clean`. Сначала спроси.
-7. **Чисти только за собой.** Если создал tmp-файл — удали. Не "приберись" в `reports/` или `secrets/` — это пользовательские артефакты.
-8. **Работай к проверяемой цели.** Каждая правка должна заканчиваться чем-то измеримым: `--syntax-check` зелёный, `verify.sh` зелёный, конкретная метрика изменилась.
+1. **Think before acting.** Read the task, read this file, read the relevant `docs/runbooks/`. Do not open the editor until you understand *what* and *why*.
+2. **Read docs first.** Before changing a playbook or role, read `docs/architecture.md` and the matching runbook. Before touching `/opt/<app>`, read `docs/ownership-matrix.md`.
+3. **Minimal changes.** One task, one change. Do not refactor "while you're there". Do not add features that were not requested.
+4. **Surgical edits.** Only touch the files you need. Do not reformat unrelated files. Do not "improve" comments.
+5. **Match project style.** YAML uses two-space indent; bash uses `set -euo pipefail`; role names are `snake_case`; playbooks are `kebab-case` with a numeric prefix.
+6. **Preserve the operator's work.** If the repo has uncommitted changes, never run `git checkout` / `reset` / `clean`. Ask first.
+7. **Clean up after yourself only.** Remove temp files you created. Do not "tidy" `reports/` or `secrets/` — those are operator artefacts.
+8. **Work toward a verifiable goal.** Every change ends with something measurable: `--syntax-check` green, `verify.sh` green, a specific metric moved.
 
 ---
 
 ## Safety Rules
 
-Жёсткие ограничения. Нарушение = регрессия.
+Hard limits. Violating them is a regression.
 
 ### Git
-- Никогда `git commit` или `git push` без явного разрешения пользователя.
-- Никогда не делай `--no-verify`, `--no-gpg-sign`, `--amend` без явного запроса.
-- Никогда `git reset --hard`, `git clean -fd`, `git checkout -- .` — это уничтожает чужую работу.
+
+- Never `git commit` or `git push` without explicit operator approval.
+- Never use `--no-verify`, `--no-gpg-sign`, or `--amend` without an explicit request.
+- Never run `git reset --hard`, `git clean -fd`, or `git checkout -- .` — these destroy the operator's work.
 
 ### Ansible / SSH
-- Никогда не запускай mutating плейбуки (`10-*, 11-*, 20-*, 30-*, 40-*, 50-*, 60-*`) без явного разрешения.
-- Перед apply — обязательно `ansible-playbook ... --check --diff` и review output.
-- Read-only операции (`99-verify.yml`, `verify.sh`, `disk-report`, `secret-scan`) можно запускать без подтверждения.
-- Если `99-verify.yml` показывает fail — сначала разобраться, потом mutating плейбук.
 
-### Docker (особенно опасно — данные приложений)
-- Никогда `docker volume prune` автоматом. Volumes хранят state.
-- Никогда `docker system prune -a` без `--filter "until=Nh"`. Без фильтра прибьёт images используемые остановленными временно контейнерами.
-- Никогда `docker compose down -v` где-либо в `/opt/*` — это снесёт application data.
-- Никогда не редактируй `/opt/<app>/docker-compose.yml` — это файл чужого репо. Override-файлы (`docker-compose.override.local.yml`) — наша зона.
+- Never run mutating playbooks (`10-*`, `11-*`, `20-*`, `30-*`, `40-*`, `50-*`, `60-*`, `70-*`) without explicit approval.
+- Before any apply, run `ansible-playbook ... --check --diff` and review the output.
+- Read-only operations (`99-verify.yml`, `verify.sh`, `disk-report`, `secret-scan`) may run without confirmation.
+- If `99-verify.yml` fails, diagnose first; do not paper over it with a mutating playbook.
+
+### Docker (highest-risk zone — application data lives here)
+
+- Never run `docker volume prune` automatically. Volumes hold state.
+- Never run `docker system prune -a` without `--filter "until=Nh"`. Without a filter it removes images held by temporarily stopped containers.
+- Never run `docker compose down -v` anywhere under `/opt/<app>/` — that wipes application data.
+- Never edit `/opt/<app>/docker-compose.yml` directly — that file belongs to the application owner. Use a `docker-compose.override.local.yml` sibling instead (see Architecture Invariants).
 
 ### System
-- Никогда не отключай UFW даже "временно для теста".
-- Никогда не редактируй `/etc/ssh/sshd_config` напрямую — только через ansible role с `validate: sshd -t -f %s` и backup.
-- Никогда не делай `apt full-upgrade` или `do-release-upgrade` без явной авторизации. Только `unattended-upgrades` с allowlist `-security`.
-- Никогда не перезагружай VPS без явного разрешения.
+
+- Never disable UFW, not even "temporarily for a test".
+- Never edit `/etc/ssh/sshd_config` directly — only through an Ansible role with `validate: sshd -t -f %s` and a config backup.
+- Never run `apt full-upgrade` or `do-release-upgrade` without explicit authorisation. Only `unattended-upgrades` with a `-security` allowlist.
+- Never reboot the VPS without explicit approval.
 
 ### Cross-project
-- Перед mutating действием на работающие сервисы (`/opt/maxtg-bridge`, `/opt/openclaw`, etc.) — прочитай `docs/ownership-matrix.md`. Это зоны других проектов; вмешательство = координация с владельцем.
-- Override-файлы лимитов (`docker-compose.override.local.yml`) — единственная легитимная модификация в чужой зоне со стороны vps_management.
+
+- Before any mutating action against a service that lives in `/opt/<app>/`, read `docs/ownership-matrix.md`. Those are other owners' zones; touching them is coordination, not autonomy.
+- Override files (`docker-compose.override.local.yml`) are the only legitimate modification this repo makes inside another owner's directory.
 
 ---
 
 ## Secrets and Privacy
 
-### Что считается секретом
-- VPS публичный IP
-- SSH user, SSH port (даже если стандартные)
-- Имена контейнеров с уникальными суффиксами/UUID
+### What counts as a secret
+
+- Real public VPS IP
+- SSH user, SSH port (even if standard)
+- Container names with unique suffixes / UUIDs
 - Telegram bot tokens, chat IDs, topic IDs
-- B2/S3 ключи, restic password (когда появятся)
-- Trusted IPs в UFW allowlist
-- Hetzner API tokens
+- B2 / S3 keys, restic password
+- Trusted IPs in UFW allowlists
+- Cloud-provider API tokens (Hetzner, AWS, DigitalOcean, etc.)
 
-### Где живут
-- **Все секреты** → `ansible/secrets/vault.yml` (ansible-vault AES-256 encrypted, в git зашифрованным).
-- Vault password → `~/.vault_pass.txt` (mode 0600, НЕ в git, бэкап в 1Password).
-- Шаблон без значений → `ansible/secrets/vault.yml.example` (в git plaintext).
+### Where they live
 
-### В коммитах и документации
-- Используй плейсхолдеры: `<vps_host>`, `<vps_ip>`, `198.51.100.10` (RFC5737 TEST-NET), `example.invalid`.
-- Никогда не коммить реальный IP/токен даже в комментарии или в `docs/`.
-- Перед каждым коммитом — `./modules/secrets-management/bin/secret-scan`. Должен exit 0.
+- **All secrets** → `ansible/secrets/vault.yml` (ansible-vault AES-256 encrypted, stored encrypted in git).
+- Vault password → `~/.vault_pass.txt` on the control machine (mode `0600`, **not** in git, backed up to a password manager).
+- Schema without values → `ansible/secrets/vault.yml.example` (plaintext, tracked).
+
+### In commits and documentation
+
+- Use placeholders: `<vps_host>`, `<vps_ip>`, `198.51.100.10` (RFC 5737 TEST-NET-1), `example.invalid`.
+- Never commit a real IP or token, not even inside a comment or in `docs/`.
+- Before every commit, run `./modules/secrets-management/bin/secret-scan`. It must exit 0.
 
 ---
 
 ## Architecture Invariants
 
-1. **Host vs app ownership** — vps_management управляет хостом. Приложения управляют собой.
-2. **Vault — single source of truth** — все секреты доступа здесь, дочерние проекты читают через `ansible-vault view` или плейсхолдеры.
-3. **Playbook numbering — semantic** — `00` bootstrap (одноразово), `10-50` mutating maintenance, `60-80` advanced/optional, `99` verify (read-only).
-4. **Read-only by default** — все operations начинаются с audit. Mutating требует явного permission.
-5. **Override files are our zone** — `/opt/<app>/docker-compose.override.local.yml` — наш способ накладывать host-policy (mem_limits, restart policies). Основной compose — не наш.
-6. **Filters always** — любой `docker prune` имеет `--filter "until=Nh"`. Без фильтра — fail.
-7. **Volumes are sacred** — никогда не prune автоматом. Только manual review.
+1. **Host vs. app ownership** — this repo manages the host. Applications manage themselves.
+2. **Vault is the single source of truth** — every access credential lives there; downstream projects read via `ansible-vault view` or use placeholders.
+3. **Playbook numbering is semantic** — `00` bootstrap (one-shot), `10–50` mutating maintenance, `60–80` advanced/optional, `99` verify (read-only).
+4. **Read-only by default** — every operation starts with an audit. Mutating requires explicit permission.
+5. **Override files are our zone** — `/opt/<app>/docker-compose.override.local.yml` is how we apply host policy (`mem_limit`, restart policy, logging caps). The base compose file is not ours.
+6. **Filters always** — every `docker prune` carries `--filter "until=Nh"`. No filter, no run.
+7. **Volumes are sacred** — never pruned automatically. Manual review only.
 
 ---
 
 ## Where Things Live
 
-| Что | Где |
+| What | Where |
 |---|---|
-| Shared rules | `AGENTS.md` (этот файл) |
-| Local Claude Code notes | `CLAUDE.md` |
+| Shared agent rules | `AGENTS.md` (this file) |
+| Claude Code local notes | `CLAUDE.md` |
 | User-facing overview | `README.md` |
 | Threat model | `SECURITY.md` |
 | Architecture docs | `docs/architecture.md`, `docs/ownership-matrix.md` |
+| Architecture Decision Records | `docs/adr/` |
 | Runbooks | `docs/runbooks/*.md` |
 | Ansible config | `ansible/ansible.cfg` |
 | Inventory | `ansible/inventory/production.yml` |
@@ -129,24 +147,25 @@ LLM-агенты часто ошибаются на ровном месте — 
 | Helper scripts (vault, ssh) | `ansible/scripts/*.sh` |
 | Module CLI tools | `modules/<module>/bin/<tool>` |
 | Module docs | `modules/<module>/docs/*.md` |
-| Verify entrypoint | `verify.sh` (root) |
-| Local-only outputs | `reports/*.md` (gitignored) |
+| Verify entrypoint | `verify.sh` (repo root) |
+| Local-only outputs | `reports/*` (gitignored) |
+| Sample outputs (sanitised) | `examples/*` |
 
 ---
 
 ## Checks
 
-Read-only проверки которые можно запускать без подтверждения:
+Read-only checks that may run without confirmation:
 
 ```bash
-# Сканер утечек секретов в коммитах
+# Secret leak scanner — run before every commit
 ./modules/secrets-management/bin/secret-scan
 
-# Синтаксис всех плейбуков
+# Syntax check for every playbook
 cd ansible
 ansible-playbook --syntax-check playbooks/*.yml
 
-# Линтеры (если установлены)
+# Linters (if installed)
 ansible-lint playbooks/ roles/
 yamllint inventory/ group_vars/ playbooks/ roles/
 
@@ -161,10 +180,11 @@ yamllint inventory/ group_vars/ playbooks/ roles/
 
 ## Docs to Read
 
-Перед любой нетривиальной правкой — прочитай относящееся:
+Before any non-trivial change, read the relevant document:
 
-- [`docs/architecture.md`](docs/architecture.md) — модель host vs app, что где живёт
-- [`docs/ownership-matrix.md`](docs/ownership-matrix.md) — кто чем владеет на VPS
-- [`docs/runbooks/disk-full.md`](docs/runbooks/disk-full.md) — что делать при заполнении диска
+- [`docs/architecture.md`](docs/architecture.md) — host-vs-app model, where things live
+- [`docs/ownership-matrix.md`](docs/ownership-matrix.md) — who owns what on the VPS
+- [`docs/adr/`](docs/adr/) — Architecture Decision Records (the *why* behind invariants)
+- [`docs/runbooks/disk-full.md`](docs/runbooks/disk-full.md) — what to do when disk fills
 - [`SECURITY.md`](SECURITY.md) — threat model, recovery boundaries
 - [`README.md`](README.md) — high-level overview, quick start

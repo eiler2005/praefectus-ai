@@ -1,159 +1,131 @@
-# Runbook: disk-full
+# Runbook: disk full
 
-Что делать когда диск VPS заполнился. От лёгкого случая (>80%) до тяжёлого (>95%).
+What to do when the VPS root filesystem fills. From mild (≥ 80 %) to critical (≥ 95 %).
 
-## Триггер
+## Trigger
 
-- `verify.sh` возвращает `disk: WARN` (≥80%) или `FAIL` (≥90%).
-- Контейнер не стартует с `no space left on device`.
-- Telegram алёрт (когда появится monitoring).
+- `verify.sh` returns `disk: WARN` (≥ 80 %) or `FAIL` (≥ 90 %).
+- A container fails to start with `no space left on device`.
+- Telegram alert from `vps-monitor.py`.
 
-## Шаг 0 — diagnose
+## Step 0 — diagnose
 
-Никогда не запускай чистку вслепую. Сначала пойми что разрослось.
+Never clean blindly. Find out what grew.
 
 ```bash
 ./modules/disk-observatory/bin/disk-report
 ```
 
-Прочитай отчёт. Обрати внимание на:
-- `sudo du -xhd1 / /var /opt /home /root` — реальные размеры, включая protected dirs.
-- `/var/lib/docker` и `/var/lib/containerd` — много images/build cache?
-- `/opt/lightrag/data` — KG распух?
-- `/opt/ghostroute-console/data/backups` — app-owned DB backups; только owner review.
-- Top large files — есть аномалии?
-- Dangling volumes — есть orphaned state?
+Read the report. Pay attention to:
 
-## Шаг 1 — стандартная чистка
+- `sudo du -xhd1 / /var /opt /home /root` — real sizes including protected dirs.
+- `/var/lib/docker` and `/var/lib/containerd` — many images / build cache?
+- Application data dirs in `/opt/<app>/data` — anomalous growth?
+- Top large files — anything weird?
+- Dangling volumes — orphaned state?
+
+## Step 1 — standard cleanup
 
 ```bash
 cd ansible
 ansible-playbook playbooks/10-disk-cleanup.yml --check --diff
-# Review что будет удалено (особенно docker prune)
+# Review what will be deleted (especially docker prune)
 ansible-playbook playbooks/10-disk-cleanup.yml
 ./verify.sh
 ```
 
-Это типично освобождает 1-5GB на работающем сервере (apt cache + journal vacuum + docker image prune старше 7 дней).
+This typically frees 1–5 GB on a working server (apt cache + journal vacuum + docker image prune older than 7 days).
 
-Если `verify.sh` зелёный и диск <80% после — закончили.
-Если `verify.sh` зелёный, но диск всё ещё ≥80% — это уже не emergency, но нужен owner review по application data.
+If `verify.sh` is green and disk is < 80 % afterwards — done.
+If `verify.sh` is green but disk is still ≥ 80 % — no longer an emergency, but the application owner should review their data dir.
 
-## Шаг 2 — если мало освободилось (<500MB)
+## Step 2 — if little was freed (< 500 MB)
 
-Возможные причины:
-1. **Application data** в `/opt/<app>/{data,workspace}` — это не наша зона, обращайся к владельцу проекта (см. `ownership-matrix.md`).
-2. **Recent docker images** — `--filter until=168h` не их захватил. Проверь активные image ID и свежие rollback tags:
+Possible causes:
+
+1. **Application data** in `/opt/<app>/{data,workspace}` — not your zone, escalate to the owner ([`ownership-matrix.md`](../ownership-matrix.md)).
+2. **Recent docker images** that the `until=168h` filter did not catch. Check active image IDs and recent rollback tags:
+
    ```bash
    ssh deploy@<vps> 'docker ps -q | xargs -r docker inspect --format "{{.Name}} {{.Config.Image}} {{.Image}}"'
    ssh deploy@<vps> 'docker images --format "{{.ID}} {{.CreatedAt}} {{.Size}} {{.Repository}}:{{.Tag}}" | sort -k2r'
    ```
-   Если есть fresh rollback images, которых не забрал age-filter:
-   - Не удаляй image ID, который используется running container.
-   - Для `ghostroute-console` оставь активный image ID, `latest`, и минимум один самый свежий unused rollback.
-   - Остальные unused rollback/git-tag images можно удалять через `docker rmi <tag-or-id>`.
-3. **Dangling volumes** — manual review. Список вывел `disk-report`. Для каждого:
+
+   When pruning rollbacks: keep the image ID used by the running container, the `latest` tag, and at least one most-recent unused rollback. Remove the rest.
+
+3. **Dangling volumes** — manual review only. For each volume in `disk-report`:
+
    ```bash
    ssh deploy@<vps> 'docker volume inspect <name>'
    ```
-   - Если `Mountpoint` пуст или содержит только tmp — `docker volume rm <name>`.
-   - Если содержит state — связаться с владельцем проекта.
-4. **Build cache не удалился** — иногда `docker builder prune --filter until=` фильтр странно работает на старых docker. Проверь:
+
+   - If the `Mountpoint` is empty or contains only tmp data → `docker volume rm <name>`.
+   - If it holds state → escalate to the application owner.
+
+4. **Build cache that did not prune** — the `until=` filter sometimes behaves oddly on older docker. Check:
+
    ```bash
    ssh deploy@<vps> 'docker buildx du'
    ```
-   При острой нужде: `docker buildx prune -af` (без фильтра — но это **только** build cache, не runtime).
 
-## App-owned cleanup candidates
+   When desperately needed: `docker buildx prune -af` (no filter — but this is **only** build cache, not runtime images).
 
-Эти пути не принадлежат `vps_management`. Удалять только после явного owner/operator approval, но полезно знать что безопасно считать reclaim-кандидатом.
+## Application-owned cleanup candidates
 
-### `router_configuration` / `ghostroute-console`
+Some paths in `/opt/<app>/` have known reclaim candidates documented by the application owner. Delete only after explicit owner approval.
 
-Источник: `router_configuration/modules/ghostroute-console/`.
+Typical candidates (verify with the owner's docs):
 
-Можно удалять после approval:
-- `/opt/ghostroute-console/data/backups/ghostroute-*.db` — daily SQLite safety backups. Код создаёт их из live DB и сам должен ограничивать retention через `GHOSTROUTE_BACKUP_RETENTION_DAYS=2` и `GHOSTROUTE_DB_BACKUP_MAX_FILES=2`.
-- Старые неактивные Docker rollback/git-tag images `ghostroute-console:*`, если image ID не используется running container. Оставь active image, `latest`, и минимум один самый свежий rollback.
+- `/opt/<app>/backups/` — daily safety backups; usually retention is bounded by env vars.
+- `/opt/<app>/data-backups/` — one-off pre-migration snapshots.
+- Old rollback Docker images for the application (keep the active image, `latest`, and one most-recent rollback).
 
-Не удалять:
-- `/opt/ghostroute-console/data/ghostroute.db` — live SQLite DB.
-- `/opt/ghostroute-console/data/snapshots/` без owner review — это runtime evidence; сначала проверь retention/collector.
-- `/opt/ghostroute-console/{auth,ssh,router-ssh,repo}` — runtime/deploy assets.
+Never delete:
 
-Проверки перед удалением backups:
-```bash
-ssh deploy@<vps> 'df -h /'
-ssh deploy@<vps> 'sudo ls -lh /opt/ghostroute-console/data/backups'
-ssh deploy@<vps> 'docker ps --format "{{.Names}} {{.Status}}" | grep ghostroute-console'
-```
+- Live SQLite / database files inside the application data dir.
+- Active workspaces.
+- Auth / SSH / repo runtime assets used by the application.
 
-Удаление approved DB backups:
-```bash
-ssh deploy@<vps> 'sudo sh -c "rm -vf /opt/ghostroute-console/data/backups/ghostroute-*.db"'
-./verify.sh
-```
+## Step 3 — if ≥ 90 % and urgent
 
-Если backups снова быстро растут, это bug/drift в `router_configuration`: проверить retention env в `/opt/ghostroute-console` compose/deploy и последний `retention_runs` в DB.
+Don't panic. Apply in order:
 
-### `openclaw_firststeps` / LightRAG and OpenClaw
+1. **Snapshot:**
 
-Источник: `openclaw_firststeps/scripts/setup-llm-wiki.sh` и operational docs.
-
-Можно удалять после approval:
-- `/opt/lightrag/backups/llm-wiki-*` — setup/import rollback snapshots.
-- `/opt/lightrag/data-backups/*pre-knowledgebackfill-reset*` — one-off pre-reset snapshots.
-- `/opt/openclaw-backup-*` — old gateway upgrade rollback dirs, если соответствующий upgrade давно принят.
-
-Не удалять:
-- `/opt/lightrag/data/rag_storage/` — live LightRAG graph/vector store.
-- `/opt/lightrag/data/inputs/` — source/input queue unless owner confirms.
-- `/opt/openclaw/config/memory/main.sqlite` — live OpenClaw memory/state DB.
-- `/opt/openclaw/workspace/` — durable workspace.
-
-Проверка кандидатов:
-```bash
-ssh deploy@<vps> 'sudo du -xhd2 /opt/lightrag /opt/openclaw 2>/dev/null | sort -hr | head -60'
-ssh deploy@<vps> 'sudo find /opt/lightrag /opt/openclaw -xdev \( -path "*/backups/*" -o -path "*/data-backups/*" -o -name "*backup*" \) -printf "%s %TY-%Tm-%Td %p\n" 2>/dev/null | sort -nr | head -60'
-```
-
-Удаление approved LightRAG/OpenClaw snapshots:
-```bash
-ssh deploy@<vps> 'sudo rm -rfv /opt/lightrag/backups/llm-wiki-* /opt/lightrag/data-backups/*pre-knowledgebackfill-reset* /opt/openclaw-backup-*'
-./verify.sh
-```
-
-## Шаг 3 — если >90% и нужно срочно
-
-Не паникуй, ничего не удаляй "наобум". Применяй по порядку:
-
-1. **Снимок состояния:**
    ```bash
    ssh deploy@<vps> 'df -h /; df -ih /; sudo du -xhd1 / /var /opt /home /root 2>/dev/null | sort -hr | head -50'
    ```
-2. **Журналы вручную:**
+
+2. **Vacuum journals manually:**
+
    ```bash
    ssh deploy@<vps> 'sudo journalctl --vacuum-size=100M'
    ```
-3. **Старые kernel пакеты:**
+
+3. **Old kernel packages:**
+
    ```bash
    ssh deploy@<vps> 'sudo apt-get autoremove --purge -y'
    ```
-4. **Большие лог-файлы конкретных сервисов:**
+
+4. **Large log files of specific services:**
+
    ```bash
    ssh deploy@<vps> 'sudo find /var/log -type f -size +100M -exec ls -lh {} \;'
-   # Для каждого: truncate -s 0 <path> (если знаешь что делаешь)
+   # For each one (only if you know what you're doing): sudo truncate -s 0 <path>
    ```
-5. **Docker — безопасный host-side prune:**
+
+5. **Safe host-side docker prune:**
+
    ```bash
-   ssh deploy@<vps> 'docker ps -a --filter "status=exited" --format "{{.ID}} {{.Names}} {{.Status}}"'
    ssh deploy@<vps> 'docker container prune -f --filter "until=72h"'
    ssh deploy@<vps> 'docker image prune -af --filter "until=168h"'
    ssh deploy@<vps> 'docker builder prune -af --filter "until=168h"'
    ```
-   Volumes не prune автоматически.
 
-После ручного emergency-pass обязательно вернись к стандартной процедуре:
+   Volumes are never pruned automatically.
+
+After the manual emergency pass, return to the standard procedure:
 
 ```bash
 cd ansible
@@ -162,36 +134,39 @@ ansible-playbook playbooks/10-disk-cleanup.yml
 ./verify.sh
 ```
 
-## Шаг 4 — если >95% и сервисы падают
+## Step 4 — if ≥ 95 % and services failing
 
-Критичная ситуация. Запретить автоматическую чистку:
-- `10-disk-cleanup.yml` имеет safety check и **остановится** если `disk_used_pct >= disk_crit_pct` (95% по умолчанию).
-- Это намеренно — на критическом диске любой `apt-get` может оставить системы в полу-сломанном состоянии.
+Critical situation. Block automatic cleanup:
 
-Действия:
-1. Свободить минимум 1-2GB вручную (см. шаг 3).
-2. После — нормальный `10-disk-cleanup.yml`.
-3. После — `./verify.sh` должен быть OK.
+- `10-disk-cleanup.yml` has a safety check and **stops** if `disk_used_pct >= disk_crit_pct` (95 % default).
+- This is intentional — on a critical disk any `apt-get` may leave the system half-broken.
 
-Если по факту места нет даже под `apt clean`:
-1. `truncate` крупных логов (но осторожно — потеря данных).
-2. `docker stop` non-critical контейнеров вручную для освобождения tmpfs/overlay.
-3. Эскалация: апгрейд плана Hetzner до CX33 (8GB/80GB) или добавление volume.
+Actions:
 
-## Шаг 5 — root cause analysis
+1. Free at least 1–2 GB manually (see Step 3).
+2. Then run the normal `10-disk-cleanup.yml`.
+3. Then `./verify.sh` must be OK.
 
-После того как вылечили — найди причину:
-- Почему `/opt/lightrag/data` вырос? — owner: openclaw_firststeps. Может быть pruning issue или KG переиндексировался.
-- Почему `/opt/ghostroute-console/data/backups` вырос? — owner: router_configuration. vps_management только фиксирует размер и reclaim potential.
-- Почему так много docker images? — owner проекта много раз rebuild без `--rm` или CI без cleanup.
-- Почему journal распух? — какой-то сервис спамит ошибками.
+If there is literally no room even for `apt clean`:
 
-Зафиксировать вывод в `reports/post-mortem-YYYY-MM-DD.md` и обсудить с владельцем проекта.
+1. `truncate` large logs (carefully — data loss).
+2. `docker stop` non-critical containers manually to free tmpfs / overlay.
+3. Escalate: upgrade the VPS plan or attach a volume.
 
-## Превентивно
+## Step 5 — root cause analysis
 
-- Canonical weekly cleanup timer: `vps-cleanup.timer`, управляется `ansible/playbooks/11-periodic-cleanup-setup.yml`.
-- Legacy `vps-weekly-cleanup.timer` должен быть disabled/removed; не включай два cleanup timer одновременно.
-- `10-disk-cleanup.yml` запускать вручную при WARN/CRIT после `--check --diff`.
-- `verify.sh` — раз в час (warn @80% даёт неделю на реакцию).
-- При появлении `30-backup.yml` — следить за тем, чтобы локальный restic-кэш на VPS не разрастался (он на VPS не нужен, restic пишет напрямую в repo).
+After recovery, find the cause:
+
+- Why did `/opt/<app>/data` grow? — owner: application project. Pruning issue or data reindexed?
+- Why so many docker images? — rebuilds without `--rm` or CI without cleanup.
+- Why did the journal balloon? — some service is spamming errors.
+
+Record the finding in `reports/post-mortem-YYYY-MM-DD.md` and discuss with the application owner.
+
+## Prevention
+
+- Canonical weekly cleanup timer: `vps-cleanup.timer`, managed by `ansible/playbooks/11-periodic-cleanup-setup.yml`.
+- Legacy `vps-weekly-cleanup.timer` must be disabled / removed; never run two cleanup timers concurrently.
+- Run `10-disk-cleanup.yml` manually on `WARN` / `CRIT` after `--check --diff`.
+- `verify.sh` hourly (warning at 80 % gives a week to react).
+- With `30-backup.yml` enabled, watch the local restic cache on the VPS — it should stay small (restic writes directly to the remote repo).
