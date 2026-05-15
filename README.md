@@ -74,6 +74,23 @@ Bring your own VPS. Fill the vault (15 minutes). Run `./verify.sh`. You have a j
 
 ---
 
+## Features
+
+What you get when you "hire" PraefectusAI:
+
+- **Always on, never PTO** — runs 24/7 from a 5-minute systemd timer. No weekends off, no sick days, no "let me get back to you Monday".
+- **A written job description** — [`AGENTS.md`](AGENTS.md) defines the role, scope, and hard limits. Tool-agnostic: Claude Code, Codex, Cursor, or any LLM that follows instructions.
+- **Knows what's not its zone** — [`docs/ownership-matrix.md`](docs/ownership-matrix.md) maps every path on the VPS to its owner. The agent reads it before touching anything cross-boundary.
+- **Asks before doing anything irreversible** — `--check --diff` is mandatory before any apply. Mutating actions require explicit operator approval; read-only checks run freely.
+- **Writes everything down** — every check produces structured JSON (`reports/health/`); a manual operator log lives in [`docs/journal/`](docs/journal/). You can audit what the agent has done in your name, any time.
+- **Has memory across runs** — `health-trend --last 10` reads the last ten reports and surfaces drift. Not just chat-window context — real persistent state.
+- **Sends alerts on its own** — Telegram on `WARN` / `CRIT`, with a synthetic test mode (`run-check --test-alert`) so you catch a dead bot token *before* you need it.
+- **Speaks your incident language** — runbooks in [`docs/runbooks/`](docs/runbooks/) are decision trees the agent follows for disk-full, security incidents, SSH lockouts, and more. It does not improvise during a fire.
+- **Onboarded in 15 minutes** — fork, fill the vault, run `./verify.sh`. No week-long setup, no consultants, no proprietary control plane.
+- **Open contract, not a black box** — MIT-licensed. Every safety rule is human-readable. Every architectural choice has an [ADR](docs/adr/). The operator owns the rules, not the vendor.
+
+---
+
 ## The name
 
 In Roman administration, a **praefectus** was an officer appointed by a higher authority — never replacing the principal, always acting on their behalf within an explicit mandate. The *Praefectus Annonae* kept the grain supply moving. The *Praefectus Urbi* ran the city in the emperor's name. The *Praefectus Praetorio* ran the imperial household.
