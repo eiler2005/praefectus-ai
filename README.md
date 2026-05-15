@@ -89,6 +89,24 @@ What you get when you "hire" PraefectusAI:
 - **Onboarded in 15 minutes** — fork, fill the vault, run `./verify.sh`. No week-long setup, no consultants, no proprietary control plane.
 - **Open contract, not a black box** — MIT-licensed. Every safety rule is human-readable. Every architectural choice has an [ADR](docs/adr/). The operator owns the rules, not the vendor.
 
+### What it does as a sysadmin
+
+The actual hands-on work — what runs on your VPS in your name, with the playbook or tool that does it:
+
+- **Cleans the disk** — `apt clean` + `autoremove`, `journalctl` vacuum (14 d / 500 MB cap), `docker container/image/builder prune` with `--filter "until=24h"`. Volumes are never touched. ([`10-disk-cleanup.yml`](ansible/playbooks/10-disk-cleanup.yml))
+- **Schedules a weekly cleanup** — same safe operations as above, run autonomously every Sunday at 03:00 UTC via systemd timer. Output captured to `/var/log/vps-weekly-cleanup.log`. ([`11-schedule-cleanup.yml`](ansible/playbooks/11-schedule-cleanup.yml))
+- **Caps container memory** — applies `mem_limit` per container via `docker-compose.override.local.yml`, with `docker update --memory` for instant effect on critical services (no restart needed). Never edits the application's own compose file. ([`60-docker-limits.yml`](ansible/playbooks/60-docker-limits.yml), [`70-docker-limits-critical.yml`](ansible/playbooks/70-docker-limits-critical.yml))
+- **Hardens SSH and patches the OS** — `fail2ban` sshd jail (24 h ban after 3 retries), `unattended-upgrades` for `-security` only (no reboots), sshd `MaxSessions` enforcement. ([`40-security.yml`](ansible/playbooks/40-security.yml))
+- **Backs up application data** — daily encrypted snapshot to Backblaze B2 via `restic`. Operator holds the encryption password; even the agent can't read its own backups. ([`30-backup.yml`](ansible/playbooks/30-backup.yml))
+- **Watches health every 5 minutes** — disk, memory, swap, load, container restart counts. Telegram alert on the first amber. ([`20-monitoring.yml`](ansible/playbooks/20-monitoring.yml))
+- **Runs a 12-check health gate on demand** — disk, memory, swap, load, Docker daemon, container status, UFW, restart counts, app dirs, listening ports, services, key file integrity. Structured JSON for trends; markdown summary for humans. ([`99-verify.yml`](ansible/playbooks/99-verify.yml))
+- **Detects drift over time** — reads N recent reports, surfaces slow regressions in disk / memory / swap / restart counts. ([`health-trend`](modules/health-trends/bin/health-trend))
+- **Audits the firewall and ports** — compares live `ss -tlnp` against your documented port map; flags new, missing, or unsafe-bound listeners. ([`port-audit`](modules/port-audit/bin/port-audit))
+- **Audits Syncthing** — finds `*.sync-conflict-*` files, files >100 MB, broken peer connections; produces a markdown report. ([`50-syncthing-audit.yml`](ansible/playbooks/50-syncthing-audit.yml))
+- **Scans for leaked secrets** — greps the repo for real IPs, SSH keys, hardcoded `api_key=` / `token=`. Runs as pre-commit hook and in CI; blocks the commit if anything matches. ([`secret-scan`](modules/secrets-management/bin/secret-scan))
+- **Aggregates maintenance history** — pulls the weekly cleanup logs from the VPS and produces a monthly markdown digest in `reports/maintenance/<YYYY-MM>.md`. ([`cleanup-fetch`](modules/maintenance-journal/bin/cleanup-fetch))
+- **Refreshes the dashboard** — regenerates [`docs/dashboard.md`](docs/dashboard.md) from the latest reports so you have a current snapshot without SSH'ing in. ([`update-dashboard`](modules/dashboard/bin/update-dashboard))
+
 ---
 
 ## The name

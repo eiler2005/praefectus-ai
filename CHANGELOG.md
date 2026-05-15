@@ -13,6 +13,7 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 - Hero banner illustration (`docs/assets/hero-banner.png`) and "The name" section in README.
 - "What PraefectusAI does for you" section in README — sales-style capabilities pitch (pain → daily routine → on-demand skills → trust through limits → audience CTA), positioned right after the tagline so a 30-second visitor sees concrete value before brand story or architecture.
 - "Features" section in README — scannable employee-qualities list framed as "what you get when you hire PraefectusAI". Complements the narrative pitch above with bullet-form selling points (always-on, written job description, ownership boundaries, persistent memory, MIT contract).
+- "What it does as a sysadmin" sub-section under Features — verb-first concrete actions (Cleans / Caps / Hardens / Backs up / Watches / Audits / Scans / Aggregates / Refreshes), each linked to the exact playbook or module that runs it. 12 items covering every active capability.
 
 ### Notes
 
