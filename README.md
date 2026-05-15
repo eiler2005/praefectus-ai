@@ -6,12 +6,11 @@
 [![Ansible](https://img.shields.io/badge/ansible-2.15+-blue.svg)](https://docs.ansible.com/)
 [![Status](https://img.shields.io/badge/status-active-brightgreen.svg)](#)
 
-**A universal framework for AI-augmented VPS and application administration.**
+**Your AI sysadmin. Under contract.**
 
-Run your VPS the way an LLM agent can safely help you operate it.
-Ansible playbooks for deterministic actions. Markdown runbooks for decisions.
-CLI tools as agent skills. Vault + scoped permissions as guardrails.
-Built around the [`AGENTS.md`](AGENTS.md) contract pattern — works with Claude Code, Codex, Cursor, and any LLM agent that follows instructions. Bring your own VPS (single host or small fleet); the patterns scale.
+PraefectusAI is a digital infrastructure administrator powered by an LLM agent. It operates your Linux VPS under an explicit mandate — narrow scope, deterministic actions, faithful reports back. The repo is its employment contract: the rules it follows, the skills it can use, the boundaries it must not cross, and the journal of everything it has done in your name.
+
+It works with Claude Code, Codex, Cursor, and any LLM agent that follows instructions, through the [`AGENTS.md`](AGENTS.md) contract pattern. Under the hood, the agent's actions are deterministic Ansible playbooks; its skills are CLI tools; its guardrails are Vault + scoped permissions; its memory is structured reports. Bring your own VPS — single host or small fleet — the patterns scale.
 
 ---
 
@@ -27,17 +26,17 @@ That is exactly what an LLM agent should be when it touches production infrastru
 
 ## Why PraefectusAI exists
 
-Operating a Linux VPS is ten percent emergencies and ninety percent the same checks: disk, memory, expiring certs, container health, log rotation, secret hygiene. That ninety percent is exactly what a competent LLM agent can handle — *if* the operator can encode the rules.
+Operating a Linux VPS is ten percent emergencies and ninety percent the same checks: disk, memory, expiring certs, container health, log rotation, secret hygiene. That ninety percent is exactly what an AI agent can handle — *if* you can hire it like an employee, not summon it like a chatbot.
 
-Most LLM-agent demos are toy: an agent given root SSH access, a vague prompt, and a hope that nothing important breaks. Production teams don't run that. They want:
+Most LLM-agent demos look like the latter: an agent given root SSH access, a vague prompt, and a hope that nothing important breaks. Production teams don't run that. A real digital coworker needs:
 
-- Hard limits on what the agent can do
-- A clear inventory of who owns what
-- Deterministic, auditable actions (not freeform shell)
+- A written mandate the agent reads before doing work
+- A clear inventory of who owns what (and what is off-limits)
+- Deterministic, auditable actions instead of freeform shell
 - Read-only by default, with explicit elevation
-- A scanner that catches the operator (and the agent) before a real IP or token reaches `git push`
+- A scanner that catches both the operator and the agent before a real IP or token reaches `git push`
 
-PraefectusAI is the structured knowledge base + skill set that gives an agent enough context to be useful and enough boundaries to stay safe. It's been running production VPS workloads — the patterns are battle-tested, not whiteboarded.
+PraefectusAI is that contract — the structured knowledge base, skill set, and reporting loop that turn an LLM agent into a trustworthy junior sysadmin. The patterns are battle-tested on a real production deployment, not whiteboarded.
 
 ---
 
