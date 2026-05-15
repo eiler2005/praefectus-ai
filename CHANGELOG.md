@@ -14,6 +14,16 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 - "What PraefectusAI does for you" section in README — sales-style capabilities pitch (pain → daily routine → on-demand skills → trust through limits → audience CTA), positioned right after the tagline so a 30-second visitor sees concrete value before brand story or architecture.
 - "Features" section in README — scannable employee-qualities list framed as "what you get when you hire PraefectusAI". Complements the narrative pitch above with bullet-form selling points (always-on, written job description, ownership boundaries, persistent memory, MIT contract).
 - "What it does as a sysadmin" sub-section under Features — verb-first concrete actions (Cleans / Caps / Hardens / Backs up / Watches / Audits / Scans / Aggregates / Refreshes), each linked to the exact playbook or module that runs it. 12 items covering every active capability.
+- AGENTS.md callout under the Features list — one short blockquote replacing the standalone "AGENTS.md contract pattern" H2 section (which duplicated information already present in Features, "The name", and four other inline links).
+
+### Removed
+
+- README "Why PraefectusAI exists" section — duplicated the philosophical argument already made in the "What PraefectusAI does for you" intro.
+- README "The AGENTS.md contract pattern" section — replaced by the inline callout above.
+
+### Changed
+
+- README section order — `Demo` and `Quick Start` moved up to sit right after `Features`, so a 30-second visitor sees runnable proof and a try-it-now path before brand story (`The name`), philosophy, architecture, and the developer-reference inventory. Reader flow becomes: hook → daily routine → employee qualities → real outputs → try it → backstory → architecture → reference. README total length dropped from 344 to 314 lines.
 
 ### Notes
 

@@ -107,108 +107,24 @@ The actual hands-on work — what runs on your VPS in your name, with the playbo
 - **Aggregates maintenance history** — pulls the weekly cleanup logs from the VPS and produces a monthly markdown digest in `reports/maintenance/<YYYY-MM>.md`. ([`cleanup-fetch`](modules/maintenance-journal/bin/cleanup-fetch))
 - **Refreshes the dashboard** — regenerates [`docs/dashboard.md`](docs/dashboard.md) from the latest reports so you have a current snapshot without SSH'ing in. ([`update-dashboard`](modules/dashboard/bin/update-dashboard))
 
----
 
-## The name
-
-In Roman administration, a **praefectus** was an officer appointed by a higher authority — never replacing the principal, always acting on their behalf within an explicit mandate. The *Praefectus Annonae* kept the grain supply moving. The *Praefectus Urbi* ran the city in the emperor's name. The *Praefectus Praetorio* ran the imperial household.
-
-The role worked because of three things: structured authority (a written mandate, not vague trust), narrow scope (one domain, well-bounded), and faithful reporting back (the principal always knew what had been done in their name).
-
-That is exactly what an LLM agent should be when it touches production infrastructure: an extension of the operator's intent within a clear contract, not a substitute for their judgment. **PraefectusAI** is that contract — `AGENTS.md` as the mandate, `ownership-matrix.md` as the scope, `reports/` and `docs/journal/` as the faithful record back to the operator.
+> **The contract is [`AGENTS.md`](AGENTS.md)** — about 200 lines, written for both humans and LLMs. Read it in five minutes; the agent reads it before every action.
 
 ---
 
-## Why PraefectusAI exists
+## Demo
 
-Operating a Linux VPS is ten percent emergencies and ninety percent the same checks: disk, memory, expiring certs, container health, log rotation, secret hygiene. That ninety percent is exactly what an AI agent can handle — *if* you can hire it like an employee, not summon it like a chatbot.
+Sanitised real outputs from a production deployment live in [`examples/`](examples/):
 
-Most LLM-agent demos look like the latter: an agent given root SSH access, a vague prompt, and a hope that nothing important breaks. Production teams don't run that. A real digital coworker needs:
+- `examples/sample-verify-output.md` — full `verify.sh` output
+- `examples/sample-dashboard.md` — generated dashboard
+- `examples/sample-health-trend.txt` — `health-trend --last 10` output
+- `examples/sample-disk-report.md` — disk report
+- `examples/sample-cleanup-log.md` — weekly auto-cleanup excerpt
+- `examples/sample-monitor-alert.md` — what a Telegram alert looks like
+- `examples/sample-secret-scan.txt` — `secret-scan` catching simulated leaks
 
-- A written mandate the agent reads before doing work
-- A clear inventory of who owns what (and what is off-limits)
-- Deterministic, auditable actions instead of freeform shell
-- Read-only by default, with explicit elevation
-- A scanner that catches both the operator and the agent before a real IP or token reaches `git push`
-
-PraefectusAI is that contract — the structured knowledge base, skill set, and reporting loop that turn an LLM agent into a trustworthy junior sysadmin. The patterns are battle-tested on a real production deployment, not whiteboarded.
-
----
-
-## Architecture at a Glance
-
-```mermaid
-flowchart LR
-  Operator["Operator (human)"] -->|"task in natural language"| Agent["LLM agent<br/>(Claude / Codex / Cursor)"]
-  Agent -->|"reads contract"| Contract["AGENTS.md<br/>ownership-matrix.md"]
-  Agent -->|"reads decision tree"| Runbook["docs/runbooks/*.md"]
-  Agent -->|"runs skill"| Skills["CLI modules<br/>(modules/*/bin/)"]
-  Agent -->|"runs action"| Playbooks["Ansible playbooks<br/>(deterministic)"]
-  Skills --> VPS[("VPS<br/>+ Docker apps")]
-  Playbooks --> VPS
-  VPS -->|"reports/health/*.json"| Memory[("Structured memory")]
-  Memory --> Agent
-  Vault["vault.yml<br/>(encrypted secrets)"] --> Playbooks
-```
-
-Three layers, isolated by intent:
-
-- **Knowledge** — `AGENTS.md`, `docs/ownership-matrix.md`, `docs/runbooks/*.md`. The agent reads these before acting. Hard rules, decision trees, scope boundaries.
-- **Actions** — `ansible/playbooks/*.yml` (deterministic, idempotent) + `modules/*/bin/*` (CLI skills). Every mutating action requires explicit operator approval; read-only checks run freely.
-- **Memory** — `reports/health/*.json` (structured, machine-readable) + `docs/journal/<YYYY-MM>.md` (manual operator notes). The agent reads these to know history.
-
-Secrets live encrypted in `ansible/secrets/vault.yml`; the vault password lives only on the operator's machine.
-
----
-
-## The AGENTS.md contract pattern
-
-`AGENTS.md` is the system prompt of this repository. Every LLM agent — regardless of which CLI it runs in — reads it first.
-
-It encodes:
-
-- **Karpathy-style workflow rules** — read first, minimal change, surgical edits, verifiable goals
-- **Hard safety limits** — never `git push --force`, never `docker volume prune`, never edit `/opt/<app>/docker-compose.yml`
-- **Secrets policy** — what counts as a secret, where they live, how to reference them in docs
-- **Architecture invariants** — what assumptions must hold across all changes
-
-The result is a small, predictable surface area. The agent does not invent new ways to break things.
-
-See [`AGENTS.md`](AGENTS.md) for the full contract.
-
----
-
-## What's in the box
-
-### Playbooks (`ansible/playbooks/`)
-
-| # | Playbook | Purpose | Mutating? |
-|---|---|---|---|
-| 10 | `10-disk-cleanup.yml` | One-shot cleanup: apt clean, journal vacuum, filtered docker prune, logrotate. Volumes untouched. | yes |
-| 11a | `11-periodic-cleanup-setup.yml` | Installs `/usr/local/bin/vps-periodic-cleanup.sh` + systemd timer (Sun 03:00 UTC). | yes (one-shot setup) |
-| 11b | `11-schedule-cleanup.yml` | Alternative weekly cleanup timer with `/var/log/vps-weekly-cleanup.log`. | yes (one-shot setup) |
-| 20 | `20-monitoring.yml` | Deploys Python poller + systemd timer (5 min). Sends Telegram alerts on `WARN` / `CRIT`. | yes |
-| 30 | `30-backup.yml` | restic + B2: encrypted offsite backups of application data. Daily timer at 02:00 UTC. | yes (one-shot setup) |
-| 40 | `40-security.yml` | `fail2ban` (sshd jail), `unattended-upgrades` (`-security` only), sshd `MaxSessions` enforcement, UFW audit. | yes |
-| 50 | `50-syncthing-audit.yml` | Reports `*.sync-conflict-*`, large files, peer status. Writes `reports/syncthing-audit-*.md`. | read + report |
-| 60 | `60-docker-limits.yml` | `mem_limit` overrides for less-critical containers. | yes (no auto-restart) |
-| 70 | `70-docker-limits-critical.yml` | `mem_limit` for critical services with immediate `docker update --memory`. | yes |
-| 99 | `99-verify.yml` | Read-only health gate. 12 checks. Emits `reports/health/*.json` + `reports/verify-*.md`. | **no** |
-
-Before any mutating playbook, run `--check --diff` and review the output. See [`AGENTS.md`](AGENTS.md) safety rules.
-
-### CLI modules (`modules/<name>/bin/`)
-
-| Command | Purpose |
-|---|---|
-| `./verify.sh` | Wrapper over `99-verify.yml`. Full health check in seconds. |
-| `./modules/dashboard/bin/update-dashboard` | Reads latest `reports/` and rebuilds `docs/dashboard.md`. |
-| `./modules/disk-observatory/bin/disk-report` | Standalone (no Ansible) SSH into VPS for `df` / `du` / `docker df`. |
-| `./modules/health-trends/bin/health-trend` | Trend analysis over the last N `reports/health/*.json`. |
-| `./modules/maintenance-journal/bin/cleanup-fetch` | Pulls weekly cleanup logs into `reports/maintenance/<YYYY-MM>.md`. |
-| `./modules/monitoring/bin/run-check` | Manual run of `vps-monitor.py`. Flags: `--test-alert`, `--log`, `--status`. |
-| `./modules/port-audit/bin/port-audit` | Compares live `ss -tlnp` against `docs/ports.md`. Flags new / unsafe bindings. |
-| `./modules/secrets-management/bin/secret-scan` | Scans the repo for leaked IPs, keys, tokens. **Run before every commit.** |
+Open any of those to see what the framework produces without provisioning a VPS.
 
 ---
 
@@ -272,19 +188,73 @@ ansible-playbook playbooks/10-disk-cleanup.yml                  # apply
 
 ---
 
-## Demo
+## The name
 
-Sanitised real outputs from a production deployment live in [`examples/`](examples/):
+In Roman administration, a **praefectus** was an officer appointed by a higher authority — never replacing the principal, always acting on their behalf within an explicit mandate. The *Praefectus Annonae* kept the grain supply moving. The *Praefectus Urbi* ran the city in the emperor's name. The *Praefectus Praetorio* ran the imperial household.
 
-- `examples/sample-verify-output.md` — full `verify.sh` output
-- `examples/sample-dashboard.md` — generated dashboard
-- `examples/sample-health-trend.txt` — `health-trend --last 10` output
-- `examples/sample-disk-report.md` — disk report
-- `examples/sample-cleanup-log.md` — weekly auto-cleanup excerpt
-- `examples/sample-monitor-alert.md` — what a Telegram alert looks like
-- `examples/sample-secret-scan.txt` — `secret-scan` catching simulated leaks
+The role worked because of three things: structured authority (a written mandate, not vague trust), narrow scope (one domain, well-bounded), and faithful reporting back (the principal always knew what had been done in their name).
 
-Open any of those to see what the framework produces without provisioning a VPS.
+That is exactly what an LLM agent should be when it touches production infrastructure: an extension of the operator's intent within a clear contract, not a substitute for their judgment. **PraefectusAI** is that contract — `AGENTS.md` as the mandate, `ownership-matrix.md` as the scope, `reports/` and `docs/journal/` as the faithful record back to the operator.
+
+---
+
+## Architecture at a Glance
+
+```mermaid
+flowchart LR
+  Operator["Operator (human)"] -->|"task in natural language"| Agent["LLM agent<br/>(Claude / Codex / Cursor)"]
+  Agent -->|"reads contract"| Contract["AGENTS.md<br/>ownership-matrix.md"]
+  Agent -->|"reads decision tree"| Runbook["docs/runbooks/*.md"]
+  Agent -->|"runs skill"| Skills["CLI modules<br/>(modules/*/bin/)"]
+  Agent -->|"runs action"| Playbooks["Ansible playbooks<br/>(deterministic)"]
+  Skills --> VPS[("VPS<br/>+ Docker apps")]
+  Playbooks --> VPS
+  VPS -->|"reports/health/*.json"| Memory[("Structured memory")]
+  Memory --> Agent
+  Vault["vault.yml<br/>(encrypted secrets)"] --> Playbooks
+```
+
+Three layers, isolated by intent:
+
+- **Knowledge** — `AGENTS.md`, `docs/ownership-matrix.md`, `docs/runbooks/*.md`. The agent reads these before acting. Hard rules, decision trees, scope boundaries.
+- **Actions** — `ansible/playbooks/*.yml` (deterministic, idempotent) + `modules/*/bin/*` (CLI skills). Every mutating action requires explicit operator approval; read-only checks run freely.
+- **Memory** — `reports/health/*.json` (structured, machine-readable) + `docs/journal/<YYYY-MM>.md` (manual operator notes). The agent reads these to know history.
+
+Secrets live encrypted in `ansible/secrets/vault.yml`; the vault password lives only on the operator's machine.
+
+---
+
+## What's in the box
+
+### Playbooks (`ansible/playbooks/`)
+
+| # | Playbook | Purpose | Mutating? |
+|---|---|---|---|
+| 10 | `10-disk-cleanup.yml` | One-shot cleanup: apt clean, journal vacuum, filtered docker prune, logrotate. Volumes untouched. | yes |
+| 11a | `11-periodic-cleanup-setup.yml` | Installs `/usr/local/bin/vps-periodic-cleanup.sh` + systemd timer (Sun 03:00 UTC). | yes (one-shot setup) |
+| 11b | `11-schedule-cleanup.yml` | Alternative weekly cleanup timer with `/var/log/vps-weekly-cleanup.log`. | yes (one-shot setup) |
+| 20 | `20-monitoring.yml` | Deploys Python poller + systemd timer (5 min). Sends Telegram alerts on `WARN` / `CRIT`. | yes |
+| 30 | `30-backup.yml` | restic + B2: encrypted offsite backups of application data. Daily timer at 02:00 UTC. | yes (one-shot setup) |
+| 40 | `40-security.yml` | `fail2ban` (sshd jail), `unattended-upgrades` (`-security` only), sshd `MaxSessions` enforcement, UFW audit. | yes |
+| 50 | `50-syncthing-audit.yml` | Reports `*.sync-conflict-*`, large files, peer status. Writes `reports/syncthing-audit-*.md`. | read + report |
+| 60 | `60-docker-limits.yml` | `mem_limit` overrides for less-critical containers. | yes (no auto-restart) |
+| 70 | `70-docker-limits-critical.yml` | `mem_limit` for critical services with immediate `docker update --memory`. | yes |
+| 99 | `99-verify.yml` | Read-only health gate. 12 checks. Emits `reports/health/*.json` + `reports/verify-*.md`. | **no** |
+
+Before any mutating playbook, run `--check --diff` and review the output. See [`AGENTS.md`](AGENTS.md) safety rules.
+
+### CLI modules (`modules/<name>/bin/`)
+
+| Command | Purpose |
+|---|---|
+| `./verify.sh` | Wrapper over `99-verify.yml`. Full health check in seconds. |
+| `./modules/dashboard/bin/update-dashboard` | Reads latest `reports/` and rebuilds `docs/dashboard.md`. |
+| `./modules/disk-observatory/bin/disk-report` | Standalone (no Ansible) SSH into VPS for `df` / `du` / `docker df`. |
+| `./modules/health-trends/bin/health-trend` | Trend analysis over the last N `reports/health/*.json`. |
+| `./modules/maintenance-journal/bin/cleanup-fetch` | Pulls weekly cleanup logs into `reports/maintenance/<YYYY-MM>.md`. |
+| `./modules/monitoring/bin/run-check` | Manual run of `vps-monitor.py`. Flags: `--test-alert`, `--log`, `--status`. |
+| `./modules/port-audit/bin/port-audit` | Compares live `ss -tlnp` against `docs/ports.md`. Flags new / unsafe bindings. |
+| `./modules/secrets-management/bin/secret-scan` | Scans the repo for leaked IPs, keys, tokens. **Run before every commit.** |
 
 ---
 
