@@ -11,6 +11,7 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 ### Added
 
 - Hero banner illustration (`docs/assets/hero-banner.png`) and "The name" section in README.
+- "What PraefectusAI does for you" section in README — sales-style capabilities pitch (pain → daily routine → on-demand skills → trust through limits → audience CTA), positioned right after the tagline so a 30-second visitor sees concrete value before brand story or architecture.
 
 ### Notes
 

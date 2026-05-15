@@ -14,6 +14,66 @@ It works with Claude Code, Codex, Cursor, and any LLM agent that follows instruc
 
 ---
 
+## What PraefectusAI does for you
+
+You have a VPS. It has problems you don't see.
+
+Disk fills up at 3 AM. A container OOM-kills when you're at dinner. Backups stopped running thirty days ago and you don't know yet. `fail2ban` quietly bans an IP every hour and you're not on the email list. The TLS cert expires next Tuesday and the renewal cron has been broken since March.
+
+These are not interesting problems. They are exactly the problems that ruin a Sunday — and they are exactly the problems an LLM agent can handle better than you, *if* the agent has a contract.
+
+### Hire PraefectusAI
+
+PraefectusAI is your AI sysadmin. It works for you 24/7. It costs you nothing (MIT-licensed). It has a written contract you can read in five minutes ([`AGENTS.md`](AGENTS.md)). And it cannot do the dumb things — they are physically out of scope.
+
+#### Every day, on its own
+
+| Cadence | What happens | Why you care |
+|---|---|---|
+| every 5 minutes | Health check on disk, memory, swap, load, container restarts. Telegram alert the moment something goes amber. | You learn about a problem before your users do. |
+| every Sunday 03:00 UTC | Safe cleanup of apt cache, `journalctl` (capped at 14 d / 500 MB), filtered `docker prune` (`--filter "until=24h"`). **Volumes are never touched.** | Disk-full outages stop happening. |
+| every day 02:00 UTC | Encrypted backup of your application data to Backblaze B2 via `restic`. The password is yours alone. | If the VPS dies tomorrow, you lose hours, not weeks. |
+
+You wake up to a green status. Or to a Telegram message that already tells you what's wrong and where to look.
+
+#### When you ask it to
+
+| You say... | The agent does... | You get... |
+|---|---|---|
+| *"Is everything OK?"* | `verify.sh` | 12-check health gate in five seconds. Structured JSON for trends; human-readable summary for you. |
+| *"Free me some disk."* | `10-disk-cleanup.yml --check --diff`, then apply | Dry-run preview, then safe cleanup. Saves you the typing — and protects you from `docker system prune -a` muscle memory. |
+| *"Audit the firewall and ports."* | `port-audit` + `firewall.md` review | Live `ss -tlnp` compared with your documented inventory. Anything that drifted is flagged. |
+| *"Apply the security baseline."* | `40-security.yml` | `fail2ban` + `unattended-upgrades` (`-security` only) + sshd hardening. Idempotent — run it once or run it weekly, same result. |
+| *"How are we trending?"* | `health-trend --last 10` | Disk / memory / swap / restart trends across the last ten reports. Catches slow drifts you'd never spot in a single snapshot. |
+| *"Test the alert channel."* | `run-check --test-alert` | A synthetic Telegram notification. Catches a dead bot token *before* you need it for real. |
+| *"Show me last month's auto-cleanup."* | `cleanup-fetch` | Aggregates the weekly cleanup logs into one operator-friendly markdown. You see what the agent has done in your name. |
+
+#### What it will not do — by design
+
+These are written into the contract ([`AGENTS.md`](AGENTS.md)). The agent refuses, even if you ask in frustration at 11 PM:
+
+- Touch your application's `docker-compose.yml`. (That's the app owner's zone.)
+- Run `docker volume prune` or `docker system prune -a` without `--filter`. (That deletes state.)
+- Disable UFW, even "just for a test".
+- `git push --force` to `main`.
+- Edit `/etc/ssh/sshd_config` directly (only via a role with `validate: sshd -t -f %s`).
+- Reboot the VPS without your explicit approval.
+
+Why have these limits at all? **Because trust is built in the things an agent won't do, not the things it can.** A junior sysadmin you'd actually hire is the one who knows what they should escalate.
+
+### Who it's for
+
+You. If you have:
+
+- One Hetzner / DigitalOcean / AWS Lightsail / Linode VPS — or a small fleet — running your projects.
+- Apps deployed via Docker Compose.
+- A nagging suspicion that you're one disk-full away from an outage.
+- Better things to do with Sunday than `apt-get autoremove`.
+
+Bring your own VPS. Fill the vault (15 minutes). Run `./verify.sh`. You have a junior sysadmin in your repo in the time it took to read this section.
+
+---
+
 ## The name
 
 In Roman administration, a **praefectus** was an officer appointed by a higher authority — never replacing the principal, always acting on their behalf within an explicit mandate. The *Praefectus Annonae* kept the grain supply moving. The *Praefectus Urbi* ran the city in the emperor's name. The *Praefectus Praetorio* ran the imperial household.
