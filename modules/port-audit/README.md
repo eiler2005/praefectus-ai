@@ -1,6 +1,6 @@
 # port-audit
 
-Compares live `ss -tlnp` listeners on the VPS against the canonical port map in [`docs/ports.md`](../../docs/ports.md). Flags new ports, missing ports, and unsafe `0.0.0.0` bindings.
+Compares live `ss -tlnp` listeners on the VPS against the canonical port map in [`docs/ports.md`](../../docs/ports.md). Flags new ports, missing ports, and unsafe `0.0.0.0` bindings for private or restricted listeners.
 
 ## Usage
 
@@ -18,6 +18,7 @@ Compares live `ss -tlnp` listeners on the VPS against the canonical port map in 
   - **Unexpected** — listening but not in `docs/ports.md`.
   - **Missing** — in `docs/ports.md` but not listening.
   - **Unsafe binding** — bound to `0.0.0.0` when `docs/ports.md` requires `127.0.0.1`.
+  - **Unsafe restricted binding** — bound publicly when the port should stay on a Docker bridge or other restricted network.
 
 ## When to run
 

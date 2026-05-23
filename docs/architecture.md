@@ -64,6 +64,30 @@ Every other project that ships code into `/opt/<app>/` is an "application owner"
 
 The escalation path during incidents is documented in [`ownership-matrix.md`](ownership-matrix.md).
 
+## Cross-project host exceptions
+
+Some host objects are intentionally owned by a routing/application project even
+though they live under system paths. PraefectusAI records and verifies them but
+does not overwrite them.
+
+```text
+maxtg_bridge container
+  -> docker bridge gateway:18057
+  -> Channel M reverse listener on VPS
+  -> SSH remote-forward opened by the home router
+  -> router direct-out / home WAN for MAX API/CDN
+```
+
+The VPS-side pieces for this lane are owned by `router_configuration`:
+
+- `/etc/ssh/sshd_config.d/51-channel-m-reverse.conf`
+- `/usr/local/sbin/channel-m-reverse-firewall.sh`
+- `channel-m-reverse-firewall.service`
+- `channel-m-reverse-firewall.timer`
+
+They keep `18057/tcp` bridge-scoped. The port must not become a public UFW or
+cloud-firewall allow.
+
 ## Vault as single source of truth
 
 Every access credential — VPS IP, SSH user, port, deploy key, alert tokens, backup credentials — lives in `ansible/secrets/vault.yml`. Application projects read these values via `ansible-vault view` or use placeholders in their own configs.

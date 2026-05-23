@@ -10,6 +10,7 @@ Inventory of every Docker container running on the VPS. Update when adding or re
 
 | Container | Criticality | `mem_limit` | Notes |
 |---|---|---|---|
+| `deploy-bridge-1` | CRITICAL | 512m | `maxtg_bridge` production bridge; MAX egress uses reverse Channel M through VPS docker bridge listener |
 | `<container-1>` | CRITICAL | `<NN>m` | Source of limit (e.g. `70-docker-limits-critical.yml`) |
 | `<container-2>` | HIGH | `<NN>m` | |
 | `<container-3>` | MEDIUM | `<NN>m` | |
@@ -29,6 +30,20 @@ Criticality scale:
 For every container, document:
 
 ```
+
+### `deploy-bridge-1`
+
+| Parameter | Value |
+|---|---|
+| Owner | `maxtg_bridge` |
+| Image | `maxtg-bridge:prod` |
+| Ports | none published; container reaches Channel M via Docker bridge gateway on `18057/tcp` |
+| Volumes | `/opt/maxtg-bridge/data`, `config.yaml`, `config.local.yaml` |
+| Healthcheck | Docker healthcheck from bridge runtime heartbeat |
+| `mem_limit` | 512m from application compose |
+| Role | MAX -> Telegram bridge; Telegram direct from VPS; MAX API/CDN through reverse Channel M |
+| Data | SQLite DB, MAX session and runtime health files under `/opt/maxtg-bridge/data` |
+| Deploy | `maxtg_bridge` repo; `infra/ansible/deploy.yml` and `infra/ansible/channel-m-reverse.yml` |
 ### <container-name>
 
 | Parameter | Value |

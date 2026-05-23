@@ -1,233 +1,289 @@
-#!/usr/bin/env bash
-# port-audit — сравнивает реальные listeners на VPS с docs/ports.md.
-# Выявляет: новые/потерянные порты, небезопасные bindings (0.0.0.0 вместо 127.0.0.1).
-#
-# Usage:
-#   ./modules/port-audit/bin/port-audit            # audit + print
-#   ./modules/port-audit/bin/port-audit --save     # + write reports/port-audit-<ts>.txt
-#   ./modules/port-audit/bin/port-audit --live-only  # только текущие listeners, без сравнения
+#!/usr/bin/env python3.12
+"""Compare live VPS listeners with docs/ports.md."""
 
-set -euo pipefail
+from __future__ import annotations
 
-REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../../.." && pwd)"
-VAULT_FILE="${REPO_ROOT}/ansible/group_vars/all/vault.yml"
-PORTS_DOC="${REPO_ROOT}/docs/ports.md"
-REPORTS_DIR="${REPO_ROOT}/reports"
+import argparse
+import datetime as dt
+import os
+import re
+import subprocess
+import sys
+from dataclasses import dataclass
+from pathlib import Path
 
-SAVE_REPORT=0
-LIVE_ONLY=0
-for arg in "$@"; do
-  case "${arg}" in
-    --save)      SAVE_REPORT=1 ;;
-    --live-only) LIVE_ONLY=1 ;;
-  esac
-done
 
-TS=$(date -u +%Y%m%dT%H%M%S)
+REPO_ROOT = Path(__file__).resolve().parents[3]
+VAULT_FILE = REPO_ROOT / "ansible/group_vars/all/vault.yml"
+PORTS_DOC = REPO_ROOT / "docs/ports.md"
+REPORTS_DIR = REPO_ROOT / "reports"
 
-# ---- SSH credentials from vault ----
-if [[ ! -f "${VAULT_FILE}" ]]; then
-  echo "ERROR: vault not found: ${VAULT_FILE}" >&2
-  exit 2
-fi
 
-VAULT_CONTENT=$(ansible-vault view "${VAULT_FILE}")
-VPS_HOST=$(echo "${VAULT_CONTENT}" | awk -F'"' '/^vault_vps_ssh_host:/ {print $2; exit}')
-VPS_USER=$(echo "${VAULT_CONTENT}" | awk -F'"' '/^vault_vps_ssh_user:/ {print $2; exit}')
-VPS_PORT=$(echo "${VAULT_CONTENT}" | awk '/^vault_vps_ssh_port:/ {print $2; exit}')
-VPS_PORT="${VPS_PORT:-22}"
+@dataclass(frozen=True)
+class ExpectedPort:
+    port: str
+    protocol: str
+    exposure: str
+    optional: bool
+    source: str
 
-if [[ -z "${VPS_HOST}" || -z "${VPS_USER}" ]]; then
-  echo "ERROR: vault_vps_ssh_host or vault_vps_ssh_user not set" >&2
-  exit 2
-fi
+    @property
+    def includes_tcp(self) -> bool:
+        proto = self.protocol.lower()
+        return "tcp" in proto or proto in {"both", "tcp+udp"}
 
-SSH_OPTS=(-p "${VPS_PORT}" -o ConnectTimeout=10 -o ServerAliveInterval=15 -o BatchMode=yes)
 
-# ---- Collect live port data from VPS ----
-echo "Collecting port data from ${VPS_USER}@${VPS_HOST}:${VPS_PORT}..." >&2
+@dataclass(frozen=True)
+class LivePort:
+    addr: str
+    port: str
+    process: str
 
-RAW_DATA=$(ssh "${SSH_OPTS[@]}" "${VPS_USER}@${VPS_HOST}" '
-  echo "=== SS_TCP ==="
-  ss -tlnp 2>/dev/null || netstat -tlnp 2>/dev/null || echo "ss/netstat n/a"
-  echo "=== SS_UDP ==="
-  ss -ulnp 2>/dev/null | tail -n +2 || echo "(none)"
-  echo "=== DOCKER_PORTS ==="
-  docker ps --format "{{.Names}} {{.Ports}}" 2>/dev/null || echo "docker n/a"
-')
+    @property
+    def key(self) -> str:
+        return f"{self.addr}:{self.port}"
 
-SS_TCP=$(echo "${RAW_DATA}" | awk '/^=== SS_TCP ===/,/^=== SS_UDP ===/' | grep -v '^=== ')
-SS_UDP=$(echo "${RAW_DATA}" | awk '/^=== SS_UDP ===/,/^=== DOCKER_PORTS ===/' | grep -v '^=== ')
-DOCKER_PORTS=$(echo "${RAW_DATA}" | awk '/^=== DOCKER_PORTS ===/,0' | grep -v '^=== ')
+    @property
+    def is_public(self) -> bool:
+        return self.addr in {"0.0.0.0", "[::]", "::", "*"}
 
-# ---- Parse listening TCP ports ----
-# ss output: State Recv-Q Send-Q Local-Address:Port Peer ...
-# We want Local-Address and Port columns
-declare -A LIVE_PORTS  # "addr:port" -> "process info"
 
-while IFS= read -r line; do
-  # Skip header and empty
-  [[ "${line}" =~ ^State ]] && continue
-  [[ -z "${line}" ]] && continue
+def run(args: list[str], *, input_text: str | None = None) -> str:
+    result = subprocess.run(
+        args,
+        input=input_text,
+        text=True,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        check=False,
+    )
+    if result.returncode != 0:
+        sys.stderr.write(result.stderr)
+        raise SystemExit(result.returncode)
+    return result.stdout
 
-  addr_port=$(echo "${line}" | awk '{print $4}')
-  proc=$(echo "${line}" | awk '{print $NF}')
 
-  # Parse addr:port (handle IPv6 like [::]:22 and 127.0.0.1:8020)
-  if [[ "${addr_port}" =~ ^\[.*\]:([0-9]+)$ ]]; then
-    port="${BASH_REMATCH[1]}"
-    addr="[::]"
-  elif [[ "${addr_port}" =~ ^(.*):([0-9]+)$ ]]; then
-    addr="${BASH_REMATCH[1]}"
-    port="${BASH_REMATCH[2]}"
-  else
-    continue
-  fi
+def vault_value(vault_text: str, key: str) -> str:
+    pattern = re.compile(rf"^{re.escape(key)}:\s*['\"]?([^'\"\n#]+)", re.MULTILINE)
+    match = pattern.search(vault_text)
+    return match.group(1).strip() if match else ""
 
-  LIVE_PORTS["${addr}:${port}"]="${proc}"
-done <<< "${SS_TCP}"
 
-if [[ "${LIVE_ONLY}" -eq 1 ]]; then
-  echo ""
-  echo "=== Live TCP listeners ==="
-  printf "%-25s %s\n" "Address:Port" "Process"
-  printf "%-25s %s\n" "------------" "-------"
-  for key in $(echo "${!LIVE_PORTS[@]}" | tr ' ' '\n' | sort); do
-    printf "%-25s %s\n" "${key}" "${LIVE_PORTS[${key}]}"
-  done
+def collect_live() -> tuple[list[LivePort], str]:
+    if not VAULT_FILE.exists():
+        raise SystemExit(f"ERROR: vault not found: {VAULT_FILE}")
 
-  echo ""
-  echo "=== Docker port bindings ==="
-  echo "${DOCKER_PORTS}"
-  exit 0
-fi
+    vault_text = run(["ansible-vault", "view", str(VAULT_FILE)])
+    host = vault_value(vault_text, "vault_vps_ssh_host")
+    user = vault_value(vault_text, "vault_vps_ssh_user")
+    port = vault_value(vault_text, "vault_vps_ssh_port") or "22"
+    if not host or not user:
+        raise SystemExit("ERROR: vault_vps_ssh_host or vault_vps_ssh_user not set")
 
-# ---- Expected ports from docs/ports.md ----
-# Parse public ports table
-declare -A EXPECTED_PUBLIC   # port -> bind description
-declare -A EXPECTED_PRIVATE  # port -> bind description
+    sys.stderr.write(f"Collecting port data from {user}@{host}:{port}...\n")
+    remote = """
+      echo "=== SS_TCP ==="
+      ss -tlnp 2>/dev/null || netstat -tlnp 2>/dev/null || echo "ss/netstat n/a"
+      echo "=== SS_UDP ==="
+      ss -ulnp 2>/dev/null | tail -n +2 || echo "(none)"
+      echo "=== DOCKER_PORTS ==="
+      docker ps --format "{{.Names}} {{.Ports}}" 2>/dev/null || echo "docker n/a"
+    """
+    raw = run(
+        [
+            "ssh",
+            "-p",
+            port,
+            "-o",
+            "ConnectTimeout=10",
+            "-o",
+            "ServerAliveInterval=15",
+            "-o",
+            "BatchMode=yes",
+            f"{user}@{host}",
+            remote,
+        ]
+    )
 
-if [[ -f "${PORTS_DOC}" ]]; then
-  # Public ports (0.0.0.0)
-  while IFS='|' read -r _ port proto service proc owner hc _; do
-    port=$(echo "${port}" | tr -d ' ')
-    [[ "${port}" =~ ^[0-9]+$ ]] || continue
-    EXPECTED_PUBLIC["${port}"]="public"
-  done < <(awk '/## Публичные порты/,/## Приватные порты/' "${PORTS_DOC}" | grep '|')
+    tcp = section(raw, "SS_TCP", "SS_UDP")
+    docker_ports = section(raw, "DOCKER_PORTS", None)
+    live: list[LivePort] = []
+    for line in tcp.splitlines():
+        if not line.strip() or line.startswith("State "):
+            continue
+        fields = line.split()
+        if len(fields) < 4:
+            continue
+        addr_port = fields[3]
+        process = fields[-1]
+        parsed = parse_addr_port(addr_port)
+        if parsed:
+            addr, port_value = parsed
+            live.append(LivePort(addr=addr, port=port_value, process=process))
+    return live, docker_ports.strip()
 
-  # Private ports (127.0.0.1)
-  while IFS='|' read -r _ port proto service proc owner hc _; do
-    port=$(echo "${port}" | tr -d ' ')
-    [[ "${port}" =~ ^[0-9]+$ ]] || continue
-    EXPECTED_PRIVATE["${port}"]="private"
-  done < <(awk '/## Приватные порты/,/## Внутренние docker-сети/' "${PORTS_DOC}" | grep '|')
-else
-  echo "WARN: docs/ports.md not found — running in live-only mode" >&2
-  LIVE_ONLY=1
-fi
 
-# ---- Build report ----
-REPORT=""
-ISSUES_FOUND=0
+def section(raw: str, start: str, end: str | None) -> str:
+    start_marker = f"=== {start} ==="
+    if start_marker not in raw:
+        return ""
+    chunk = raw.split(start_marker, 1)[1]
+    if end:
+        end_marker = f"=== {end} ==="
+        chunk = chunk.split(end_marker, 1)[0]
+    return "\n".join(line for line in chunk.splitlines() if not line.startswith("=== "))
 
-REPORT+="Port Audit — vps-prod — ${TS}"$'\n'
-REPORT+="=================================="$'\n\n'
 
-REPORT+="Live TCP listeners:"$'\n'
-REPORT+=$(printf "%-25s %s\n" "Address:Port" "Process")$'\n'
-REPORT+=$(printf "%-25s %s\n" "------------" "-------")$'\n'
-for key in $(echo "${!LIVE_PORTS[@]}" | tr ' ' '\n' | sort); do
-  REPORT+=$(printf "%-25s %s\n" "${key}" "${LIVE_PORTS[${key}]}")$'\n'
-done
-REPORT+=$'\n'
+def parse_addr_port(value: str) -> tuple[str, str] | None:
+    match = re.match(r"^\[(.*)\]:(\d+)$", value)
+    if match:
+        return f"[{match.group(1)}]", match.group(2)
+    match = re.match(r"^(.*):(\d+)$", value)
+    if match:
+        return match.group(1), match.group(2)
+    return None
 
-# ---- Check for unsafe bindings ----
-REPORT+="Security checks:"$'\n'
-UNSAFE_FOUND=0
-for key in "${!LIVE_PORTS[@]}"; do
-  addr=$(echo "${key}" | sed 's/:[0-9]*$//')
-  port=$(echo "${key}" | grep -oE '[0-9]+$')
 
-  # Port expected private but bound to 0.0.0.0 or [::]
-  if [[ -n "${EXPECTED_PRIVATE[${port}]+x}" ]]; then
-    if [[ "${addr}" == "0.0.0.0" ]] || [[ "${addr}" == "[::]" ]] || [[ "${addr}" == "*" ]]; then
-      REPORT+="  ⚠️  UNSAFE BINDING: port ${port} should be 127.0.0.1 but is on ${addr}"$'\n'
-      ISSUES_FOUND=$((ISSUES_FOUND + 1))
-      UNSAFE_FOUND=1
-    fi
-  fi
-done
-if [[ "${UNSAFE_FOUND}" -eq 0 ]]; then
-  REPORT+="  OK — no unsafe public bindings detected"$'\n'
-fi
-REPORT+=$'\n'
+def parse_expected() -> dict[str, list[ExpectedPort]]:
+    if not PORTS_DOC.exists():
+        return {}
 
-# ---- New ports not in docs ----
-REPORT+="New/unexpected ports (not in docs/ports.md):"$'\n'
-NEW_FOUND=0
-for key in "${!LIVE_PORTS[@]}"; do
-  addr=$(echo "${key}" | sed 's/:[0-9]*$//')
-  port=$(echo "${key}" | grep -oE '[0-9]+$')
+    expected: dict[str, list[ExpectedPort]] = {}
+    current: str | None = None
+    for raw_line in PORTS_DOC.read_text(encoding="utf-8").splitlines():
+        line = raw_line.strip()
+        lower = line.lower()
+        if lower.startswith("## public ports") or lower.startswith("## публичные порты"):
+            current = "public"
+            continue
+        if lower.startswith("## restricted ports") or lower.startswith("## ограниченные порты"):
+            current = "restricted"
+            continue
+        if lower.startswith("## private ports") or lower.startswith("## приватные порты"):
+            current = "private"
+            continue
+        if lower.startswith("## internal docker networks") or lower.startswith("## внутренние docker"):
+            current = None
+            continue
+        if current is None or not line.startswith("|"):
+            continue
+        cells = [cell.strip() for cell in line.strip("|").split("|")]
+        if not cells or not re.fullmatch(r"\d+", cells[0]):
+            continue
+        row_text = " ".join(cells)
+        port = cells[0]
+        expected.setdefault(port, []).append(
+            ExpectedPort(
+                port=port,
+                protocol=cells[1] if len(cells) > 1 else "TCP",
+                exposure=current,
+                optional="optional" in row_text.lower(),
+                source=row_text,
+            )
+        )
+    return expected
 
-  if [[ -z "${EXPECTED_PUBLIC[${port}]+x}" ]] && [[ -z "${EXPECTED_PRIVATE[${port}]+x}" ]]; then
-    REPORT+="  NEW: ${key} (${LIVE_PORTS[${key}]})"$'\n'
-    NEW_FOUND=1
-    # Only flag as issue if it's public-facing
-    if [[ "${addr}" == "0.0.0.0" ]] || [[ "${addr}" == "[::]" ]] || [[ "${addr}" == "*" ]]; then
-      ISSUES_FOUND=$((ISSUES_FOUND + 1))
-    fi
-  fi
-done
-if [[ "${NEW_FOUND}" -eq 0 ]]; then
-  REPORT+="  OK — all listeners match docs/ports.md"$'\n'
-fi
-REPORT+=$'\n'
 
-# ---- Missing expected ports ----
-REPORT+="Missing expected ports:"$'\n'
-MISSING_FOUND=0
-for port in "${!EXPECTED_PUBLIC[@]}" "${!EXPECTED_PRIVATE[@]}"; do
-  # Check if this port appears in any listener
-  found=0
-  for key in "${!LIVE_PORTS[@]}"; do
-    key_port=$(echo "${key}" | grep -oE '[0-9]+$')
-    if [[ "${key_port}" == "${port}" ]]; then
-      found=1
-      break
-    fi
-  done
-  if [[ "${found}" -eq 0 ]]; then
-    REPORT+="  MISSING: port ${port} (expected in docs/ports.md)"$'\n'
-    MISSING_FOUND=1
-  fi
-done
-if [[ "${MISSING_FOUND}" -eq 0 ]]; then
-  REPORT+="  OK — all expected ports are listening"$'\n'
-fi
-REPORT+=$'\n'
+def render_report(live: list[LivePort], docker_ports: str, expected: dict[str, list[ExpectedPort]], ts: str) -> tuple[str, int]:
+    issues = 0
+    lines: list[str] = [
+        f"Port Audit - vps-prod - {ts}",
+        "==================================",
+        "",
+        "Live TCP listeners:",
+        f"{'Address:Port':25} Process",
+        f"{'------------':25} -------",
+    ]
+    for item in sorted(live, key=lambda item: (item.port, item.addr)):
+        lines.append(f"{item.key:25} {item.process}")
+    lines.append("")
 
-# ---- Docker ports ----
-REPORT+="Docker container port bindings:"$'\n'
-REPORT+="${DOCKER_PORTS}"$'\n\n'
+    by_port: dict[str, list[LivePort]] = {}
+    for item in live:
+        by_port.setdefault(item.port, []).append(item)
 
-# ---- Summary ----
-REPORT+="=================================="$'\n'
-if [[ "${ISSUES_FOUND}" -gt 0 ]]; then
-  REPORT+="RESULT: ${ISSUES_FOUND} issue(s) found — see above"$'\n'
-else
-  REPORT+="RESULT: OK — no issues found"$'\n'
-fi
-REPORT+="=================================="$'\n'
+    lines.append("Security checks:")
+    unsafe: list[str] = []
+    for item in live:
+        expected_rows = expected.get(item.port, [])
+        if any(row.exposure == "private" for row in expected_rows) and item.is_public:
+            unsafe.append(f"UNSAFE BINDING: port {item.port} should be private but is on {item.addr}")
+        if any(row.exposure == "restricted" for row in expected_rows) and item.is_public:
+            unsafe.append(f"UNSAFE BINDING: port {item.port} should be restricted but is on {item.addr}")
+    if unsafe:
+        issues += len(unsafe)
+        lines.extend(f"  {line}" for line in unsafe)
+    else:
+        lines.append("  OK - no unsafe public bindings detected")
+    lines.append("")
 
-echo "${REPORT}"
+    lines.append("New/unexpected ports (not in docs/ports.md):")
+    new_found = False
+    for item in sorted(live, key=lambda item: (item.port, item.addr)):
+        if item.port not in expected:
+            new_found = True
+            lines.append(f"  NEW: {item.key} ({item.process})")
+            if item.is_public:
+                issues += 1
+    if not new_found:
+        lines.append("  OK - all listeners match docs/ports.md")
+    lines.append("")
 
-if [[ "${SAVE_REPORT}" -eq 1 ]]; then
-  mkdir -p "${REPORTS_DIR}"
-  REPORT_PATH="${REPORTS_DIR}/port-audit-${TS}.txt"
-  printf '%s' "${REPORT}" > "${REPORT_PATH}"
-  echo ""
-  echo "Report saved: ${REPORT_PATH}" >&2
-fi
+    lines.append("Missing expected ports:")
+    missing_found = False
+    for port, rows in sorted(expected.items(), key=lambda pair: int(pair[0])):
+        if port in by_port:
+            continue
+        required_rows = [row for row in rows if not row.optional and row.includes_tcp]
+        if not required_rows:
+            continue
+        missing_found = True
+        lines.append(f"  MISSING: port {port} (expected in docs/ports.md)")
+    if not missing_found:
+        lines.append("  OK - all required expected ports are listening")
+    lines.append("")
 
-# Exit with error if issues found
-[[ "${ISSUES_FOUND}" -gt 0 ]] && exit 1 || exit 0
+    lines.append("Docker container port bindings:")
+    lines.append(docker_ports or "(none)")
+    lines.append("")
+    lines.append("==================================")
+    if issues:
+        lines.append(f"RESULT: {issues} issue(s) found - see above")
+    else:
+        lines.append("RESULT: OK - no issues found")
+    lines.append("==================================")
+    return "\n".join(lines) + "\n", issues
+
+
+def main() -> int:
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--save", action="store_true")
+    parser.add_argument("--live-only", action="store_true")
+    args = parser.parse_args()
+
+    live, docker_ports = collect_live()
+    if args.live_only:
+        print("")
+        print("=== Live TCP listeners ===")
+        print(f"{'Address:Port':25} Process")
+        print(f"{'------------':25} -------")
+        for item in sorted(live, key=lambda item: (item.port, item.addr)):
+            print(f"{item.key:25} {item.process}")
+        print("")
+        print("=== Docker port bindings ===")
+        print(docker_ports)
+        return 0
+
+    ts = dt.datetime.now(dt.UTC).strftime("%Y%m%dT%H%M%S")
+    report, issues = render_report(live, docker_ports, parse_expected(), ts)
+    print(report)
+    if args.save:
+        REPORTS_DIR.mkdir(parents=True, exist_ok=True)
+        path = REPORTS_DIR / f"port-audit-{ts}.txt"
+        path.write_text(report, encoding="utf-8")
+        sys.stderr.write(f"Report saved: {path}\n")
+    return 1 if issues else 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

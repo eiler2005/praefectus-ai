@@ -17,6 +17,7 @@ Ports intentionally exposed to the public internet.
 | 22 | TCP | sshd | system (sshd) | PraefectusAI | `nc -z <host> 22` |
 | 80 | TCP | HTTP → HTTPS redirect, ACME challenge | system (caddy / nginx) | application owner | `curl -I http://<host>/` |
 | 443 | TCP | HTTPS | system (caddy / nginx) | application owner | TLS handshake |
+| 2087 | TCP | Admin console HTTPS | system reverse proxy | application owner | TLS handshake |
 | 22000 | TCP | Syncthing sync | system (syncthing) | PraefectusAI | TCP connect |
 | 22000 | UDP | Syncthing sync (QUIC) | system (syncthing) | PraefectusAI | UDP connect |
 | 21027 | UDP | Syncthing discovery | system (syncthing) | PraefectusAI | UDP connect |
@@ -28,6 +29,7 @@ Ports that must be reachable only from a defined source network (Docker bridge, 
 | Port | Protocol | Service | Source | Owner | Note |
 |---|---|---|---|---|---|
 | 15353 | TCP+UDP | Internal DNS resolver (Unbound) | 172.22.0.0/16 (Docker bridge) | application owner | Optional; UFW rule remains for diagnostics |
+| 18057 | TCP | Channel M reverse MAX egress listener | compose Docker bridge only | router_configuration / maxtg_bridge | Internal SSH remote-forward endpoint; not public UFW/cloud-firewall exposure |
 
 ## Private ports (`127.0.0.1` — internal only)
 
@@ -35,8 +37,23 @@ Ports bound to the loopback interface only. Reachable from the VPS itself or via
 
 | Port | Protocol | Service | Container | Owner | Healthcheck |
 |---|---|---|---|---|---|
+| 53 | TCP | systemd-resolved local DNS stub | system | PraefectusAI | local resolver check |
+| 2019 | TCP | reverse proxy admin endpoint | system reverse proxy | application owner | local admin only |
+| 3000 | TCP | GhostRoute Console | `ghostroute-console` | application owner | app health/API |
+| 3001 | TCP | companion local app endpoint | application container | application owner | app health/API |
 | 8384 | TCP | Syncthing Web UI | system (syncthing) | PraefectusAI | `curl /rest/system/ping` |
-| `<app port>` | TCP | application API | `<application container>` | application owner | `GET /health` |
+| 8020 | TCP | LightRAG app | `lightrag-lightrag-1` | application owner | app health/API |
+| 8092 | TCP | AgentMail email bridge | `agentmail-email-bridge` | application owner | app health/API |
+| 8093 | TCP | Signals bridge | `signals-bridge` | application owner | app health/API |
+| 8094 | TCP | AgentMail work email bridge | `agentmail-work-email-bridge` | application owner | app health/API |
+| 8095 | TCP | Wiki import app | `wiki-import` | application owner | app health/API |
+| 8443 | TCP | Xray local backend | `xray` | routing project | local reverse-proxy/backend check |
+| 18081 | TCP | Channel B/XHTTP local backend | `xray-xhttp` | routing project | local backend check |
+| 18789 | TCP | OpenClaw gateway | `openclaw-openclaw-gateway-1` | application owner | app health/API |
+| 18790 | TCP | OpenClaw gateway companion port | `openclaw-openclaw-gateway-1` | application owner | app health/API |
+| 20128 | TCP | OmniRoute app endpoint | `omniroute` | application owner | app health/API |
+| 20129 | TCP | OmniRoute companion endpoint | `omniroute` | application owner | app health/API |
+| 54321 | TCP | Xray API/local control endpoint | `xray` | routing project | local control only |
 
 Replace `<app port>` rows with your own services.
 
@@ -45,6 +62,7 @@ Replace `<app port>` rows with your own services.
 | Service | Network | Internal port | Note |
 |---|---|---|---|
 | redis (example) | application_default | 6379 | available only inside the network |
+| maxtg bridge | deploy_default | bridge container reaches host gateway on 18057 | reverse Channel M maps proxy host to the Docker bridge gateway with `extra_hosts` |
 
 ---
 

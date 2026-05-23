@@ -12,8 +12,11 @@ This document is meant to be **forked and customised** for your deployment. The 
 | `/etc/ufw/` | PraefectusAI | firewall rules | Yes |
 | `/etc/fail2ban/` | PraefectusAI | jails | Yes |
 | `/etc/systemd/system/` | PraefectusAI | host-level units (monitoring, backup) | Yes for own units only |
+| `/etc/systemd/system/channel-m-reverse-firewall.*` | `router_configuration` | Channel M reverse docker bridge firewall persistence | No; verify only from this repo |
 | `/etc/logrotate.d/vps-management` | PraefectusAI | logrotate for system services | Yes |
 | `/etc/caddy/`, `/etc/nginx/` | application project (e.g. routing/proxy owner) | host reverse-proxy config | **No** (coordinate only) |
+| `/etc/ssh/sshd_config.d/51-channel-m-reverse.conf` | `router_configuration` | Deploy-user scoped `GatewayPorts clientspecified` for Channel M reverse listener | No; preserve during SSH hardening |
+| `/usr/local/sbin/channel-m-reverse-firewall.sh` | `router_configuration` | Reinstalls the docker bridge INPUT allow for Channel M | No; preserve during cleanup |
 | `/var/log/` | PraefectusAI | system + service logs | Yes (vacuum, rotate) |
 | `/var/lib/docker/` | PraefectusAI (host-side) | docker storage | Yes (`prune` with `--filter` only!) |
 | `/var/cache/apt/` | PraefectusAI | apt cache | Yes (clean) |
@@ -27,6 +30,7 @@ Each application running on the VPS is an "owner" with its own deploy pipeline. 
 | Path | Owner project | What's inside | Deployed via | PraefectusAI override |
 |---|---|---|---|---|
 | `/opt/<app-1>/` | `<app-1-repo>` | bridge service, sqlite, sessions | application's own ansible | `docker-compose.override.local.yml` for `mem_limit` |
+| `/opt/maxtg-bridge/` | `maxtg_bridge` | MAX -> Telegram bridge, SQLite state, MAX session, compose config | `maxtg_bridge` Ansible | host-level limits only; do not edit app compose/env directly |
 | `/opt/<app-2>/` | `<app-2-repo>` | gateway, workspace, config | application's own deploy script | `mem_limit` |
 | `/opt/<app-3>/` | `<app-3-repo>` | KG + vector store (high OOM risk) | application's own deploy script | `mem_limit` (critical) |
 | `/opt/<app-4>/` | `<app-4-repo>` | router service | application's own deploy script | `mem_limit` |

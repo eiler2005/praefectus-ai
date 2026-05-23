@@ -58,9 +58,23 @@ Status: active
 | 22000 | TCP+UDP | Syncthing peer sync (control machine ↔ VPS) | PraefectusAI |
 | 53 | TCP+UDP | **DENY IN** — VPS must never serve as a public DNS resolver | PraefectusAI |
 | 15353 | TCP+UDP | Internal DNS resolver — only reachable from a defined Docker bridge | application owner |
+| 18057 | TCP | Channel M reverse MAX egress listener — reachable only from the compose Docker bridge; not a UFW public allow | router_configuration / maxtg_bridge |
 | 443, 53 | OUT | Outbound HTTPS and DNS — needed for apt, restic backups, ACME | PraefectusAI |
 
 **Everything else — DROP** (UFW default deny incoming).
+
+### Non-UFW host rules
+
+Channel M reverse MAX egress installs a narrow host-level `iptables` INPUT allow
+for the compose Docker bridge subnet to reach the Docker bridge gateway on
+`18057/tcp`. This rule is managed by `router_configuration` through:
+
+- `/usr/local/sbin/channel-m-reverse-firewall.sh`
+- `channel-m-reverse-firewall.service`
+- `channel-m-reverse-firewall.timer`
+
+It must stay bridge-scoped. Do not add `18057/tcp` to public UFW rules or cloud
+firewall rules.
 
 ---
 
