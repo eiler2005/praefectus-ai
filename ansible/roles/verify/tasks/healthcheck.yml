@@ -2,66 +2,66 @@
 # Healthcheck for a single container. Included via include_tasks with loop_var=hc_item.
 # Supports three types: docker (native healthcheck), http://..., tcp:host:port
 
-- name: "healthcheck | docker inspect for {{ hc_item.name }}"
+- name: "healthcheck | docker inspect for {{ hc_name }}"
   ansible.builtin.command: >
-    docker inspect --format={{ '{{.State.Health.Status}}' | quote }} {{ hc_item.name }}
+    docker inspect --format={{ '{{.State.Health.Status}}' | quote }} {{ hc_name }}
   register: hc_docker_status
   changed_when: false
   failed_when: false
   check_mode: false
-  when: hc_item.healthcheck == 'docker'
+  when: hc_type == 'docker'
 
-- name: "healthcheck | http for {{ hc_item.name }}"
+- name: "healthcheck | http for {{ hc_name }}"
   ansible.builtin.uri:
-    url: "{{ hc_item.healthcheck }}"
+    url: "{{ hc_type }}"
     method: GET
     status_code: [200, 204]
     timeout: 5
   register: hc_http_status
   failed_when: false
   check_mode: false
-  when: hc_item.healthcheck.startswith('http')
+  when: hc_type.startswith('http')
 
-- name: "healthcheck | tcp for {{ hc_item.name }}"
+- name: "healthcheck | tcp for {{ hc_name }}"
   ansible.builtin.wait_for:
-    host: "{{ hc_item.healthcheck.split(':')[1] }}"
-    port: "{{ hc_item.healthcheck.split(':')[2] }}"
+    host: "{{ hc_type.split(':')[1] }}"
+    port: "{{ hc_type.split(':')[2] }}"
     timeout: 3
     state: started
   register: hc_tcp_status
   failed_when: false
   check_mode: false
-  when: hc_item.healthcheck.startswith('tcp:')
+  when: hc_type.startswith('tcp:')
 
 - name: "healthcheck | record docker status"
   ansible.builtin.set_fact:
     verify_results: >-
       {{ verify_results + [{
-        'check': 'health:' ~ hc_item.name,
+        'check': 'health:' ~ hc_name,
         'status': (
           'ok' if hc_docker_status.stdout in ['healthy', 'none', '<no value>']
           else 'fail'
         ),
         'detail': 'docker health=' ~ (hc_docker_status.stdout | default('?'))
       }] }}
-  when: hc_item.healthcheck == 'docker'
+  when: hc_type == 'docker'
 
 - name: "healthcheck | record http status"
   ansible.builtin.set_fact:
     verify_results: >-
       {{ verify_results + [{
-        'check': 'health:' ~ hc_item.name,
+        'check': 'health:' ~ hc_name,
         'status': ('ok' if (hc_http_status.status | default(0)) in [200, 204] else 'fail'),
-        'detail': 'http=' ~ (hc_http_status.status | default('unreachable')) ~ ' url=' ~ hc_item.healthcheck
+        'detail': 'http=' ~ (hc_http_status.status | default('unreachable')) ~ ' url=' ~ hc_type
       }] }}
-  when: hc_item.healthcheck.startswith('http')
+  when: hc_type.startswith('http')
 
 - name: "healthcheck | record tcp status"
   ansible.builtin.set_fact:
     verify_results: >-
       {{ verify_results + [{
-        'check': 'health:' ~ hc_item.name,
+        'check': 'health:' ~ hc_name,
         'status': ('ok' if not (hc_tcp_status.failed | default(true)) else 'fail'),
-        'detail': 'tcp=' ~ hc_item.healthcheck.split(':', 1)[1] ~ ' ' ~ ('reachable' if not (hc_tcp_status.failed | default(true)) else 'unreachable')
+        'detail': 'tcp=' ~ hc_type.split(':', 1)[1] ~ ' ' ~ ('reachable' if not (hc_tcp_status.failed | default(true)) else 'unreachable')
       }] }}
-  when: hc_item.healthcheck.startswith('tcp:')
+  when: hc_type.startswith('tcp:')

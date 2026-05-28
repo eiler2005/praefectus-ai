@@ -21,7 +21,7 @@ SWAP_WARN_PCT = 80
 
 EXPECTED_CONTAINERS = [
 {% for c in expected_containers | default([]) %}
-    "{{ c.name }}",
+    "{{ c.name if c is mapping else c }}",
 {% endfor %}
 ]
 

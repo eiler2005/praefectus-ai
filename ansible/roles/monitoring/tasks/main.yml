@@ -18,6 +18,7 @@
     mode: "0600"
   delegate_to: localhost
   become: false
+  check_mode: false
 
 - name: "monitoring | deploy vps-monitor.py"
   ansible.builtin.copy:
@@ -35,6 +36,7 @@
     state: absent
   delegate_to: localhost
   become: false
+  check_mode: false
 
 # ---- Systemd units ----
 - name: "monitoring | deploy vps-monitor.service"
@@ -93,7 +95,7 @@
 - name: "monitoring | display status"
   ansible.builtin.debug:
     msg:
-      - "vps-monitor.timer: {{ r_verify.stdout | trim }}"
+      - "vps-monitor.timer: {{ r_verify.stdout | default('check mode') | trim }}"
       - "Script: /usr/local/bin/vps-monitor.py"
       - "State:  /opt/vps-monitor/state.json"
       - "Log:    /var/log/vps-monitor.log"

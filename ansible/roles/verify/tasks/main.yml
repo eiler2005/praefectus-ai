@@ -123,25 +123,32 @@
   ansible.builtin.set_fact:
     verify_results: >-
       {{ verify_results + [{
-        'check': 'container_running:' ~ item.name,
-        'status': ('ok' if item.name in vfy_running_containers else 'fail'),
-        'detail': ('owner=' ~ item.owner ~ ' running' if item.name in vfy_running_containers else 'owner=' ~ item.owner ~ ' NOT RUNNING')
+        'check': 'container_running:' ~ (item.name if item is mapping else item),
+        'status': ('ok' if (item.name if item is mapping else item) in vfy_running_containers else 'fail'),
+        'detail': (
+          'owner=' ~ (item.owner | default('unknown')) ~ ' running'
+          if (item.name if item is mapping else item) in vfy_running_containers
+          else 'owner=' ~ (item.owner | default('unknown')) ~ ' NOT RUNNING'
+        )
       }] }}
   loop: "{{ expected_containers | default([]) }}"
   loop_control:
-    label: "{{ item.name }}"
+    label: "{{ item.name if item is mapping else item }}"
   when: verify_check_containers | bool
 
 # === 7. Container healthchecks (for running containers) ===
 - name: "verify | 7) container healthchecks"
   ansible.builtin.include_tasks: healthcheck.yml
+  vars:
+    hc_name: "{{ hc_item.name if hc_item is mapping else hc_item }}"
+    hc_type: "{{ hc_item.healthcheck if hc_item is mapping and hc_item.healthcheck is defined else 'docker' }}"
   loop: "{{ expected_containers | default([]) }}"
   loop_control:
     loop_var: hc_item
-    label: "{{ hc_item.name }}"
+    label: "{{ hc_item.name if hc_item is mapping else hc_item }}"
   when:
     - verify_check_containers | bool
-    - hc_item.name in vfy_running_containers
+    - (hc_item.name if hc_item is mapping else hc_item) in vfy_running_containers
 
 # === 8. UFW status (optional; do not fail if not installed) ===
 - name: "verify | 8a) ufw status"
