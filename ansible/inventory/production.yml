@@ -20,7 +20,9 @@ all:
                 - /opt/openclaw
                 - /opt/lightrag
             vps-hostkey-hermes:
-              expected_app_dirs: []
-              expected_containers: []
+              expected_app_dirs:
+                - /opt/moex-futoi
+              expected_containers:
+                - moex-futoi-bot-1
         vps_bootstrap:
           hosts: {}
