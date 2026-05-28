@@ -36,6 +36,7 @@ Each application running on the VPS is an "owner" with its own deploy pipeline. 
 | `/opt/<app-3>/` | `<app-3-repo>` | KG + vector store (high OOM risk) | application's own deploy script | `mem_limit` (critical) |
 | `/opt/lightrag/` | `openclaw_firststeps` | LightRAG service, RAG storage, inputs, config, compose overrides | application's own deploy script | `docker-compose.override.local.yml` for host-level limits |
 | `/opt/<app-4>/` | `<app-4-repo>` | router service | application's own deploy script | `mem_limit` |
+| `/opt/moex-futoi/` | `moex_futoi` | MOEX/FUTOI trading signal bot, market data, signal registry, reports, compose deploy files | application's own deploy script | host-level monitoring only; do not edit app compose/env directly |
 | `/opt/<routing-app>/` | `<routing-repo>` | stealth-routing config | routing project ansible | **No** |
 | `/opt/<obsidian-vault>/` | PraefectusAI (Syncthing host) | bidirectional sync with control machine | Syncthing | Yes |
 

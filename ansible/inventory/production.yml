@@ -26,6 +26,8 @@ all:
               expected_app_dirs:
                 - /opt/moex-futoi
               expected_containers:
-                - moex-futoi-bot-1
+                - name: moex-futoi-bot-1
+                  owner: moex_futoi
+                  healthcheck: docker
         vps_bootstrap:
           hosts: {}
