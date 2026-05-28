@@ -17,7 +17,7 @@ SSH_HELPER="${REPO_ROOT}/ansible/scripts/ssh-vps.sh"
 
 # Parse args
 ACTION="check"
-HOST_ALIAS="${VPS_TARGET:-vps-prod}"
+HOST_ALIAS="${VPS_TARGET:-vps-hetzner-prod}"
 while [[ $# -gt 0 ]]; do
   case "$1" in
     --host)

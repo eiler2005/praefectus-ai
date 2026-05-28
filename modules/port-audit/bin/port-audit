@@ -264,7 +264,7 @@ def render_report(live: list[LivePort], docker_ports: str, expected: dict[str, l
 
 def main() -> int:
     parser = argparse.ArgumentParser()
-    parser.add_argument("--host", default=os.environ.get("VPS_TARGET", "vps-prod"))
+    parser.add_argument("--host", default=os.environ.get("VPS_TARGET", "vps-hetzner-prod"))
     parser.add_argument("--save", action="store_true")
     parser.add_argument("--live-only", action="store_true")
     args = parser.parse_args()

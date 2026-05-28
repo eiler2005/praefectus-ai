@@ -1,4 +1,4 @@
-# VPS dashboard — vps-prod
+# VPS dashboard — vps-hetzner-prod
 
 > Updated: 2026-05-04 11:19 UTC
 

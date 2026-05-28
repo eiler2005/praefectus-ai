@@ -9,7 +9,7 @@ import sys, os, json, time, subprocess, datetime, argparse, urllib.request, urll
 TG_BOT_TOKEN = "{{ vault_tg_infra_bot_token | default('') }}"
 TG_CHAT_ID   = "{{ vault_tg_infra_chat_id | default('') }}"
 TG_TOPIC_ID  = "{{ vault_tg_infra_topic_id | default('') }}"
-HOST_NAME    = "{{ inventory_hostname }}"
+HOST_NAME    = "{{ vps_display_name | default(inventory_hostname) }}"
 
 DISK_WARN_PCT = {{ verify_disk_warn_pct | default(80) }}
 DISK_CRIT_PCT = {{ verify_disk_crit_pct | default(90) }}
@@ -19,8 +19,9 @@ LOAD_WARN     = {{ loadavg_warn | default(2.0) }}
 LOAD_CRIT     = {{ loadavg_crit | default(4.0) }}
 SWAP_WARN_PCT = 80
 
+{% set monitor_expected_containers = monitoring_expected_containers | default(expected_containers | default([])) %}
 EXPECTED_CONTAINERS = [
-{% for c in expected_containers | default([]) %}
+{% for c in monitor_expected_containers %}
     "{{ c.name if c is mapping else c }}",
 {% endfor %}
 ]

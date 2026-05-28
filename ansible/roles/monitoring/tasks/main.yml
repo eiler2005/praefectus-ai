@@ -9,6 +9,16 @@
   changed_when: false
 
 # ---- Poller script ----
+# Materialize host-scoped values before the delegated local render below.
+- name: "monitoring | prepare host-scoped render vars"
+  ansible.builtin.set_fact:
+    monitoring_expected_containers: >-
+      {{
+        (expected_containers | default([]))
+        if (expected_containers is defined and not (expected_containers is string))
+        else (vault_expected_containers | default([]))
+      }}
+
 # Note: template is rendered locally then uploaded via copy to avoid become: true
 # variable scoping issues that cause Jinja2 vault vars to render as empty.
 - name: "monitoring | render vps-monitor.py locally"

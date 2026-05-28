@@ -19,7 +19,7 @@ SSH_HELPER="${REPO_ROOT}/ansible/scripts/ssh-vps.sh"
 
 WRITE_FILE=1
 FILTER_MONTH=""  # empty = current month only; "all" = all months
-HOST_ALIAS="${VPS_TARGET:-vps-prod}"
+HOST_ALIAS="${VPS_TARGET:-vps-hetzner-prod}"
 while [[ $# -gt 0 ]]; do
   case "$1" in
     --host)

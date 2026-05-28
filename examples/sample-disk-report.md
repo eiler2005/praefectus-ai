@@ -1,4 +1,4 @@
-# Disk report — vps-prod — 20260512T063326
+# Disk report — vps-hetzner-prod — 20260512T063326
 
 ## Filesystem usage
 

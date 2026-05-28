@@ -26,6 +26,8 @@
 - name: "20 | VPS monitoring — install poller + timer"
   hosts: vps
   gather_facts: false
+  vars_files:
+    - ../group_vars/all/vault.yml
 
   tasks:
     # --- Validation ---

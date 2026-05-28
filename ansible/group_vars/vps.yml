@@ -22,7 +22,7 @@ logrotate_targets:
 
 # Expected application directories and containers are host-specific.
 # Per-host inventory vars may override these; legacy vault_expected_containers
-# is kept as the vps-prod default.
+# is kept as the vps-hetzner-prod default.
 expected_app_dirs: []
 expected_containers: "{{ vault_expected_containers | default([]) }}"
 

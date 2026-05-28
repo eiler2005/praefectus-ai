@@ -5,7 +5,7 @@ This is what `vps-monitor.py` posts to the operator Telegram channel when it cro
 ## CRIT — disk full
 
 ```
-🔴 CRIT vps-prod — Disk usage 92% (>=90% CRIT)
+🔴 CRIT vps-hetzner-prod — Disk usage 92% (>=90% CRIT)
 
   / : 35.1G/38.0G (92%) used
   Swap: 38% used
@@ -23,7 +23,7 @@ Action: ./verify.sh and review docs/runbooks/disk-full.md
 ## WARN — swap pressure
 
 ```
-🟡 WARN vps-prod — Swap usage 73% (>=40% WARN)
+🟡 WARN vps-hetzner-prod — Swap usage 73% (>=40% WARN)
 
   / : 25.6G/38.0G (71%) used
   RAM available: 1024 MB
@@ -44,7 +44,7 @@ Hint: container near memory limit?
 When you want to confirm the bot/chat are wired up without waiting for a real event:
 
 ```
-🧪 TEST vps-prod — Telegram alerting healthy
+🧪 TEST vps-hetzner-prod — Telegram alerting healthy
   Bot: @<your-bot>
   Chat: -100<chat-id>
   Topic: <topic-id> (if set)

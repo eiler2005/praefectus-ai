@@ -96,7 +96,7 @@ For multiple VPS hosts, inventory aliases are public but endpoints are encrypted
 
 ```yaml
 vault_vps_hosts:
-  vps-prod:
+  vps-hetzner-prod:
     ssh_host: "<vps_ip_or_dns>"
     ssh_user: "deploy"
     ssh_port: 22

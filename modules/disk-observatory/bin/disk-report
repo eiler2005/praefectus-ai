@@ -15,7 +15,7 @@ REPORTS_DIR="${REPO_ROOT}/reports"
 SSH_HELPER="${REPO_ROOT}/ansible/scripts/ssh-vps.sh"
 
 SAVE_REPORT=1
-HOST_ALIAS="${VPS_TARGET:-vps-prod}"
+HOST_ALIAS="${VPS_TARGET:-vps-hetzner-prod}"
 
 while [[ $# -gt 0 ]]; do
   case "$1" in

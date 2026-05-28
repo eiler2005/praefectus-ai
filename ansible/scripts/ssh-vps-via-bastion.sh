@@ -24,7 +24,7 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 ANSIBLE_DIR="$(cd "${SCRIPT_DIR}/.." && pwd)"
 VAULT_FILE="${ANSIBLE_DIR}/group_vars/all/vault.yml"
-HOST_ALIAS="${VPS_TARGET:-vps-prod}"
+HOST_ALIAS="${VPS_TARGET:-vps-hetzner-prod}"
 
 if [[ "${1:-}" == "--host" ]]; then
   HOST_ALIAS="${2:?usage: ssh-vps-via-bastion.sh [--host <inventory-host>] [command...]}"

@@ -95,7 +95,7 @@ Formal criteria for VPS state. Used by `99-verify.yml`, `health-trend`, and the 
 ```json
 {
   "timestamp": "2026-05-03T09:00:00Z",
-  "host": "vps-prod",
+  "host": "vps-hetzner-prod",
   "overall_status": "ok",
   "metrics": {
     "disk_pct": 78,

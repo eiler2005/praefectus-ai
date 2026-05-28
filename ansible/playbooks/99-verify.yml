@@ -6,6 +6,8 @@
 - name: "99 | Verify — read-only health checks"
   hosts: vps
   gather_facts: false
+  vars_files:
+    - ../group_vars/all/vault.yml
 
   vars:
     report_dir_local: "{{ playbook_dir }}/../../reports"

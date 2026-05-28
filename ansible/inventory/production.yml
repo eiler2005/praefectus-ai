@@ -14,12 +14,14 @@ all:
       children:
         vps:
           hosts:
-            vps-prod:
+            vps-hetzner-prod:
+              vps_display_name: maxtg-router-openclaw-cx23
               expected_app_dirs:
                 - /opt/maxtg-bridge
                 - /opt/openclaw
                 - /opt/lightrag
             vps-hostkey-hermes:
+              vps_display_name: pulsartrlab-hermes-hostkey
               expected_app_dirs:
                 - /opt/moex-futoi
               expected_containers:

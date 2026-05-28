@@ -5,10 +5,10 @@
 #
 # Usage:
 #   vault-get.sh vault_vps_ssh_host              # legacy root scalar
-#   vault-get.sh --host vps-prod ssh_host        # vault_vps_hosts.vps-prod.ssh_host
+#   vault-get.sh --host vps-hetzner-prod ssh_host
 #
-# Host-scoped keys fall back to the legacy root keys for vps-prod so older
-# vaults keep working while the repo moves to a multi-VPS schema.
+# Host-scoped keys fall back to the legacy root keys for the Hetzner prod
+# alias so older vaults keep working while the repo moves to a multi-VPS schema.
 
 set -euo pipefail
 
@@ -119,7 +119,7 @@ value = ""
 if host:
     value = host_scalar(host, key)
 
-if not value and (not host or host == "vps-prod"):
+if not value and (not host or host in {"vps-hetzner-prod", "vps-prod"}):
     legacy_key = LEGACY.get(key, key)
     value = root_scalar(legacy_key)
 
