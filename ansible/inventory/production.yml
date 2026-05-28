@@ -20,6 +20,7 @@ all:
                 - /opt/maxtg-bridge
                 - /opt/openclaw
                 - /opt/lightrag
+                - /opt/fluentloop-bot
             vps-hostkey-hermes:
               vps_display_name: pulsartrlab-hermes-hostkey
               expected_app_dirs:

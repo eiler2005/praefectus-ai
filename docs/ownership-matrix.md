@@ -32,7 +32,9 @@ Each application running on the VPS is an "owner" with its own deploy pipeline. 
 | `/opt/<app-1>/` | `<app-1-repo>` | bridge service, sqlite, sessions | application's own ansible | `docker-compose.override.local.yml` for `mem_limit` |
 | `/opt/maxtg-bridge/` | `maxtg_bridge` | MAX -> Telegram bridge, SQLite state, MAX session, compose config | `maxtg_bridge` Ansible | host-level limits only; do not edit app compose/env directly |
 | `/opt/<app-2>/` | `<app-2-repo>` | gateway, workspace, config | application's own deploy script | `mem_limit` |
+| `/opt/fluentloop-bot/` | `fluentloop_bot` | Telegram learning bot, SQLite state, lesson/material data, compose config | application's own deploy script | host-level monitoring only; do not edit app compose/env directly |
 | `/opt/<app-3>/` | `<app-3-repo>` | KG + vector store (high OOM risk) | application's own deploy script | `mem_limit` (critical) |
+| `/opt/lightrag/` | `openclaw_firststeps` | LightRAG service, RAG storage, inputs, config, compose overrides | application's own deploy script | `docker-compose.override.local.yml` for host-level limits |
 | `/opt/<app-4>/` | `<app-4-repo>` | router service | application's own deploy script | `mem_limit` |
 | `/opt/<routing-app>/` | `<routing-repo>` | stealth-routing config | routing project ansible | **No** |
 | `/opt/<obsidian-vault>/` | PraefectusAI (Syncthing host) | bidirectional sync with control machine | Syncthing | Yes |
