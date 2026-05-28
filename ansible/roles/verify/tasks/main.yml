@@ -127,7 +127,7 @@
         'status': ('ok' if item.name in vfy_running_containers else 'fail'),
         'detail': ('owner=' ~ item.owner ~ ' running' if item.name in vfy_running_containers else 'owner=' ~ item.owner ~ ' NOT RUNNING')
       }] }}
-  loop: "{{ vault_expected_containers | default([]) }}"
+  loop: "{{ expected_containers | default([]) }}"
   loop_control:
     label: "{{ item.name }}"
   when: verify_check_containers | bool
@@ -135,7 +135,7 @@
 # === 7. Container healthchecks (for running containers) ===
 - name: "verify | 7) container healthchecks"
   ansible.builtin.include_tasks: healthcheck.yml
-  loop: "{{ vault_expected_containers | default([]) }}"
+  loop: "{{ expected_containers | default([]) }}"
   loop_control:
     loop_var: hc_item
     label: "{{ hc_item.name }}"

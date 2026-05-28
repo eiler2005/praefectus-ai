@@ -5,10 +5,22 @@ all:
   vars:
     ansible_python_interpreter: /usr/bin/python3
   children:
-    vps:
-      hosts:
-        vps-prod:
-          ansible_host: "{{ lookup('ansible.builtin.pipe', inventory_dir ~ '/../scripts/vault-get.sh vault_vps_ssh_host') }}"
-          ansible_user: "{{ lookup('ansible.builtin.pipe', inventory_dir ~ '/../scripts/vault-get.sh vault_vps_ssh_user') }}"
-          ansible_port: "{{ lookup('ansible.builtin.pipe', inventory_dir ~ '/../scripts/vault-get.sh vault_vps_ssh_port') | default(22, true) }}"
-          ansible_ssh_private_key_file: "{{ lookup('ansible.builtin.pipe', inventory_dir ~ '/../scripts/vault-get.sh vault_vps_ssh_key') | default('~/.ssh/id_rsa', true) }}"
+    vps_targets:
+      vars:
+        ansible_host: "{{ lookup('ansible.builtin.pipe', inventory_dir ~ '/../scripts/vault-get.sh --host ' ~ inventory_hostname ~ ' ssh_host') }}"
+        ansible_user: "{{ lookup('ansible.builtin.pipe', inventory_dir ~ '/../scripts/vault-get.sh --host ' ~ inventory_hostname ~ ' ssh_user') }}"
+        ansible_port: "{{ lookup('ansible.builtin.pipe', inventory_dir ~ '/../scripts/vault-get.sh --host ' ~ inventory_hostname ~ ' ssh_port') | default(22, true) }}"
+        ansible_ssh_private_key_file: "{{ lookup('ansible.builtin.pipe', inventory_dir ~ '/../scripts/vault-get.sh --host ' ~ inventory_hostname ~ ' ssh_key') | default('~/.ssh/id_rsa', true) }}"
+      children:
+        vps:
+          hosts:
+            vps-prod:
+              expected_app_dirs:
+                - /opt/maxtg-bridge
+                - /opt/openclaw
+                - /opt/lightrag
+            vps-hostkey-hermes:
+              expected_app_dirs: []
+              expected_containers: []
+        vps_bootstrap:
+          hosts: {}

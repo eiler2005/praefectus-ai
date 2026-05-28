@@ -15,6 +15,7 @@ from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
 VAULT_FILE = REPO_ROOT / "ansible/group_vars/all/vault.yml"
+VAULT_GET = REPO_ROOT / "ansible/scripts/vault-get.sh"
 PORTS_DOC = REPO_ROOT / "docs/ports.md"
 REPORTS_DIR = REPO_ROOT / "reports"
 
@@ -69,18 +70,22 @@ def vault_value(vault_text: str, key: str) -> str:
     return match.group(1).strip() if match else ""
 
 
-def collect_live() -> tuple[list[LivePort], str]:
+def vault_ssh_value(host_alias: str, key: str) -> str:
+    return run([str(VAULT_GET), "--host", host_alias, key]).strip()
+
+
+def collect_live(host_alias: str) -> tuple[list[LivePort], str]:
     if not VAULT_FILE.exists():
         raise SystemExit(f"ERROR: vault not found: {VAULT_FILE}")
 
-    vault_text = run(["ansible-vault", "view", str(VAULT_FILE)])
-    host = vault_value(vault_text, "vault_vps_ssh_host")
-    user = vault_value(vault_text, "vault_vps_ssh_user")
-    port = vault_value(vault_text, "vault_vps_ssh_port") or "22"
+    host = vault_ssh_value(host_alias, "ssh_host")
+    user = vault_ssh_value(host_alias, "ssh_user")
+    port = vault_ssh_value(host_alias, "ssh_port") or "22"
+    key = vault_ssh_value(host_alias, "ssh_key")
     if not host or not user:
-        raise SystemExit("ERROR: vault_vps_ssh_host or vault_vps_ssh_user not set")
+        raise SystemExit(f"ERROR: SSH host/user for {host_alias} not set")
 
-    sys.stderr.write(f"Collecting port data from {user}@{host}:{port}...\n")
+    sys.stderr.write(f"Collecting port data from {host_alias}...\n")
     remote = """
       echo "=== SS_TCP ==="
       ss -tlnp 2>/dev/null || netstat -tlnp 2>/dev/null || echo "ss/netstat n/a"
@@ -89,21 +94,23 @@ def collect_live() -> tuple[list[LivePort], str]:
       echo "=== DOCKER_PORTS ==="
       docker ps --format "{{.Names}} {{.Ports}}" 2>/dev/null || echo "docker n/a"
     """
-    raw = run(
-        [
-            "ssh",
-            "-p",
-            port,
-            "-o",
-            "ConnectTimeout=10",
-            "-o",
-            "ServerAliveInterval=15",
-            "-o",
-            "BatchMode=yes",
-            f"{user}@{host}",
-            remote,
-        ]
-    )
+    ssh_args = [
+        "ssh",
+        "-p",
+        port,
+        "-o",
+        "ConnectTimeout=10",
+        "-o",
+        "ServerAliveInterval=15",
+        "-o",
+        "BatchMode=yes",
+    ]
+    if key:
+        key_path = Path(os.path.expanduser(key))
+        if key_path.exists():
+            ssh_args.extend(["-i", str(key_path)])
+    ssh_args.extend([f"{user}@{host}", remote])
+    raw = run(ssh_args)
 
     tcp = section(raw, "SS_TCP", "SS_UDP")
     docker_ports = section(raw, "DOCKER_PORTS", None)
@@ -184,10 +191,10 @@ def parse_expected() -> dict[str, list[ExpectedPort]]:
     return expected
 
 
-def render_report(live: list[LivePort], docker_ports: str, expected: dict[str, list[ExpectedPort]], ts: str) -> tuple[str, int]:
+def render_report(live: list[LivePort], docker_ports: str, expected: dict[str, list[ExpectedPort]], ts: str, host_alias: str) -> tuple[str, int]:
     issues = 0
     lines: list[str] = [
-        f"Port Audit - vps-prod - {ts}",
+        f"Port Audit - {host_alias} - {ts}",
         "==================================",
         "",
         "Live TCP listeners:",
@@ -257,11 +264,12 @@ def render_report(live: list[LivePort], docker_ports: str, expected: dict[str, l
 
 def main() -> int:
     parser = argparse.ArgumentParser()
+    parser.add_argument("--host", default=os.environ.get("VPS_TARGET", "vps-prod"))
     parser.add_argument("--save", action="store_true")
     parser.add_argument("--live-only", action="store_true")
     args = parser.parse_args()
 
-    live, docker_ports = collect_live()
+    live, docker_ports = collect_live(args.host)
     if args.live_only:
         print("")
         print("=== Live TCP listeners ===")
@@ -275,11 +283,11 @@ def main() -> int:
         return 0
 
     ts = dt.datetime.now(dt.UTC).strftime("%Y%m%dT%H%M%S")
-    report, issues = render_report(live, docker_ports, parse_expected(), ts)
+    report, issues = render_report(live, docker_ports, parse_expected(), ts, args.host)
     print(report)
     if args.save:
         REPORTS_DIR.mkdir(parents=True, exist_ok=True)
-        path = REPORTS_DIR / f"port-audit-{ts}.txt"
+        path = REPORTS_DIR / f"port-audit-{args.host}-{ts}.txt"
         path.write_text(report, encoding="utf-8")
         sys.stderr.write(f"Report saved: {path}\n")
     return 1 if issues else 0

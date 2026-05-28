@@ -23,7 +23,7 @@ wg*.conf
 *.ovpn
 
 # ---- Local secrets fallback ----
-# (Canonical store is ansible/secrets/vault.yml, encrypted)
+# (Canonical store is ansible/group_vars/all/vault.yml, encrypted)
 /secrets/*
 !/secrets/.gitkeep
 

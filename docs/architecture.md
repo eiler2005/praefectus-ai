@@ -39,7 +39,7 @@ This split lets you:
 
 ## What PraefectusAI does
 
-- **Bootstrap** *(planned: `00-bootstrap.yml`)* — bring a fresh VM to a known baseline state.
+- **Bootstrap** — `00-bootstrap.yml` brings a fresh VM to a known baseline state: Docker Engine, Compose plugin, `deploy` user, SSH key, and sudo.
 - **Maintenance** — `10-disk-cleanup.yml`, `11-periodic-cleanup-setup.yml`, `20-monitoring.yml`, `30-backup.yml`, `40-security.yml`.
 - **Limits** — `60-docker-limits.yml`, `70-docker-limits-critical.yml` (host-side `mem_limit` policy via override files).
 - **Audit / verify** — `99-verify.yml` read-only health gate.
@@ -90,7 +90,23 @@ cloud-firewall allow.
 
 ## Vault as single source of truth
 
-Every access credential — VPS IP, SSH user, port, deploy key, alert tokens, backup credentials — lives in `ansible/secrets/vault.yml`. Application projects read these values via `ansible-vault view` or use placeholders in their own configs.
+Every access credential — VPS IP, SSH user, port, deploy key, alert tokens, backup credentials — lives in `ansible/group_vars/all/vault.yml`. Application projects read these values via `ansible-vault view` or use placeholders in their own configs.
+
+For multiple VPS hosts, inventory aliases are public but endpoints are encrypted:
+
+```yaml
+vault_vps_hosts:
+  vps-prod:
+    ssh_host: "<vps_ip_or_dns>"
+    ssh_user: "deploy"
+    ssh_port: 22
+    ssh_key: "~/.ssh/id_rsa"
+```
+
+`ansible/inventory/production.yml` keeps hosts in two operational groups:
+
+- `vps` — ready managed hosts. Regular read-only checks and maintenance target this group.
+- `vps_bootstrap` — fresh hosts that still need `00-bootstrap.yml`; move them to `vps` after `deploy` SSH and `99-verify` are green.
 
 The vault password (`~/.vault_pass.txt`) lives only on the operator's control machine, encrypted offsite as backup.
 

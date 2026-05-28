@@ -8,7 +8,7 @@ PraefectusAI is a single-operator framework for managing one or a small number o
 |---|---|---|
 | `~/.vault_pass.txt` | Control machine, mode `0600` | Full VPS access — IP, SSH, every downstream secret |
 | `~/.ssh/<deploy_key>` | Control machine | SSH access to the VPS as the `deploy` user |
-| `ansible/secrets/vault.yml` | This repo, encrypted | With the vault password, equivalent to `~/.vault_pass.txt` |
+| `ansible/group_vars/all/vault.yml` | This repo, encrypted | With the vault password, equivalent to `~/.vault_pass.txt` |
 | Restic password | In vault | Read/decrypt every backup snapshot |
 | B2 / S3 application key | In vault | Delete or overwrite remote backups |
 | Telegram bot token | In vault | Send forged alerts as the operator's bot |
@@ -65,7 +65,7 @@ The operator explicitly accepts:
 
 ## Secrets Policy
 
-- Real values live only in `ansible/secrets/vault.yml` (encrypted) or in gitignored local files.
+- Real values live only in `ansible/group_vars/all/vault.yml` (encrypted) or in gitignored local files.
 - Tracked docs use placeholders: `<vps_host>`, `<vps_ip>`, `198.51.100.10`, `example.invalid`.
 - Never commit a generated profile, real UUID, private key, admin path, or production listener value.
 - Run `./modules/secrets-management/bin/secret-scan` before pushing.

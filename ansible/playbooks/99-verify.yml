@@ -93,9 +93,13 @@
 
     - name: "verify | 8) expected app dirs"
       ansible.builtin.raw: |
-        for d in /opt/maxtg-bridge /opt/openclaw /opt/lightrag; do
+        {% if (expected_app_dirs | default([]) | length) == 0 %}
+        echo "(none configured)"
+        {% else %}
+        for d in {{ expected_app_dirs | default([]) | join(' ') }}; do
           [ -d "$d" ] && echo "OK $d" || echo "MISSING $d"
         done
+        {% endif %}
       register: vfy_dirs_raw
       changed_when: false
       check_mode: false
@@ -129,7 +133,7 @@
       ansible.builtin.debug:
         msg:
           - "============================================================"
-          - "VERIFY SUMMARY — vps-prod"
+          - "VERIFY SUMMARY — {{ inventory_hostname }}"
           - "============================================================"
           - "SSH:         OK"
           - "Disk /:      {{ vfy_disk_pct }}% | WARN >= {{ vault_disk_warn_pct | default(80) }}% CRIT >= {{ vault_disk_crit_pct | default(90) }}%"

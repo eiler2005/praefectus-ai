@@ -1,0 +1,184 @@
+---
+# Fresh VPS bootstrap: deploy user + Docker Engine.
+#
+# Mutating playbook. Required workflow:
+#   ansible-playbook playbooks/00-bootstrap.yml --limit <host> --check --diff
+#   ansible-playbook playbooks/00-bootstrap.yml --limit <host>
+#
+# Assumes a fresh Ubuntu VPS reachable over SSH, usually as root. It does not
+# change application directories and it does not deploy apps.
+
+- name: "00 | Fresh VPS bootstrap"
+  hosts: vps_bootstrap
+  gather_facts: true
+  become: true
+
+  vars_files:
+    - "{{ playbook_dir }}/../group_vars/all/vault.yml"
+
+  vars:
+    deploy_user: "{{ vault_deploy_user | default('deploy') }}"
+    docker_apt_arch_map:
+      x86_64: amd64
+      aarch64: arm64
+      armv7l: armhf
+    docker_apt_arch: "{{ docker_apt_arch_map.get(ansible_facts.architecture, ansible_facts.architecture) }}"
+    docker_keyring_dir: /etc/apt/keyrings
+    docker_gpg_key: /etc/apt/keyrings/docker.asc
+    docker_repo: >-
+      deb [arch={{ docker_apt_arch }} signed-by={{ docker_gpg_key }}]
+      https://download.docker.com/linux/ubuntu {{ ansible_facts.distribution_release }} stable
+
+  pre_tasks:
+    - name: "00 | validate | Ubuntu target"
+      ansible.builtin.assert:
+        that:
+          - ansible_facts.distribution == "Ubuntu"
+          - ansible_facts.distribution_major_version | int >= 22
+        fail_msg: "00-bootstrap.yml supports Ubuntu 22.04+ targets."
+
+    - name: "00 | validate | deploy public key configured"
+      ansible.builtin.assert:
+        that:
+          - vault_deploy_user_pubkey is defined
+          - vault_deploy_user_pubkey | length > 30
+          - "'placeholder' not in vault_deploy_user_pubkey"
+        fail_msg: "Set vault_deploy_user_pubkey in the encrypted vault before bootstrap."
+
+  tasks:
+    - name: "00 | audit | existing Docker"
+      ansible.builtin.command: docker --version
+      register: docker_existing
+      changed_when: false
+      failed_when: false
+      check_mode: false
+
+    - name: "00 | audit | display target"
+      ansible.builtin.debug:
+        msg:
+          - "Host: {{ inventory_hostname }}"
+          - "OS: {{ ansible_facts.distribution }} {{ ansible_facts.distribution_version }} ({{ ansible_facts.distribution_release }})"
+          - "Arch: {{ ansible_facts.architecture }} -> Docker apt arch {{ docker_apt_arch }}"
+          - "Docker: {{ docker_existing.stdout | default('not installed') }}"
+
+    - name: "00 | docker repo | remove conflicting Docker apt source entries"
+      ansible.builtin.shell: |
+        set -euo pipefail
+        changed=0
+        canonical="{{ docker_repo }}"
+        while IFS= read -r file; do
+          [ -n "$file" ] || continue
+          if [ "$file" = "/etc/apt/sources.list" ]; then
+            cp "$file" "${file}.vps-management.bak"
+            sed -i '/download\.docker\.com\/linux\/ubuntu/d' "$file"
+            changed=1
+          elif [ "$file" = "/etc/apt/sources.list.d/docker.list" ] \
+             && [ "$(grep -v '^[[:space:]]*$' "$file" | wc -l | tr -d ' ')" = "1" ] \
+             && grep -qxF "$canonical" "$file"; then
+            :
+          else
+            rm -f "$file"
+            changed=1
+          fi
+        done < <(grep -rl 'download.docker.com/linux/ubuntu' /etc/apt/sources.list /etc/apt/sources.list.d 2>/dev/null || true)
+        if [ "$changed" -eq 1 ]; then echo CHANGED; else echo OK; fi
+      args:
+        executable: /bin/bash
+      register: docker_source_cleanup
+      changed_when: "'CHANGED' in docker_source_cleanup.stdout"
+
+    - name: "00 | apt | install prerequisites"
+      ansible.builtin.apt:
+        name:
+          - ca-certificates
+          - curl
+          - gnupg
+          - lsb-release
+          - python3-apt
+          - sudo
+        state: present
+        update_cache: true
+
+    - name: "00 | docker repo | keyring dir"
+      ansible.builtin.file:
+        path: "{{ docker_keyring_dir }}"
+        state: directory
+        owner: root
+        group: root
+        mode: "0755"
+
+    - name: "00 | docker repo | official GPG key"
+      ansible.builtin.get_url:
+        url: https://download.docker.com/linux/ubuntu/gpg
+        dest: "{{ docker_gpg_key }}"
+        owner: root
+        group: root
+        mode: "0644"
+        force: true
+
+    - name: "00 | docker repo | apt source"
+      ansible.builtin.apt_repository:
+        repo: "{{ docker_repo }}"
+        filename: docker
+        state: present
+        update_cache: true
+
+    - name: "00 | docker | install engine and compose plugin"
+      ansible.builtin.apt:
+        name:
+          - docker-ce
+          - docker-ce-cli
+          - containerd.io
+          - docker-buildx-plugin
+          - docker-compose-plugin
+        state: present
+
+    - name: "00 | docker | enable service"
+      ansible.builtin.service:
+        name: docker
+        state: started
+        enabled: true
+
+    - name: "00 | user | create deploy account"
+      ansible.builtin.user:
+        name: "{{ deploy_user }}"
+        groups:
+          - sudo
+          - docker
+        append: true
+        shell: /bin/bash
+        create_home: true
+
+    - name: "00 | user | authorized key"
+      ansible.posix.authorized_key:
+        user: "{{ deploy_user }}"
+        key: "{{ vault_deploy_user_pubkey }}"
+        path: "/home/{{ deploy_user }}/.ssh/authorized_keys"
+        state: present
+        manage_dir: true
+
+    - name: "00 | sudo | deploy passwordless sudo"
+      ansible.builtin.copy:
+        dest: "/etc/sudoers.d/90-{{ deploy_user }}"
+        owner: root
+        group: root
+        mode: "0440"
+        content: "{{ deploy_user }} ALL=(ALL) NOPASSWD:ALL\n"
+        validate: "/usr/sbin/visudo -cf %s"
+
+    - name: "00 | verify | Docker versions"
+      ansible.builtin.command: "{{ item }}"
+      loop:
+        - docker --version
+        - docker compose version
+        - systemctl is-active docker
+      register: bootstrap_verify
+      changed_when: false
+      check_mode: false
+
+    - name: "00 | summary"
+      ansible.builtin.debug:
+        msg:
+          - "BOOTSTRAP OK — {{ inventory_hostname }}"
+          - "{{ bootstrap_verify.results | map(attribute='stdout') | list }}"
+          - "Next: switch this host's vault ssh_user to {{ deploy_user }} and run 99-verify."

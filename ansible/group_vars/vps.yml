@@ -20,11 +20,11 @@ logrotate_targets:
   - path: /var/log/caddy
     pattern: "*.log"
 
-# Expected application directories (sanity check in 99-verify)
-expected_app_dirs:
-  - /opt/<app-1>
-  - /opt/<app-2>
-  - /opt/<app-3>
+# Expected application directories and containers are host-specific.
+# Per-host inventory vars may override these; legacy vault_expected_containers
+# is kept as the vps-prod default.
+expected_app_dirs: []
+expected_containers: "{{ vault_expected_containers | default([]) }}"
 
 # Health threshold defaults (overridable from vault)
 disk_warn_pct_default: 80

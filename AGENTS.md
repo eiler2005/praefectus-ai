@@ -31,7 +31,7 @@ Target host model: any Linux VPS with SSH + Docker. Reference deployment is a si
 
 Full ownership map → [`docs/ownership-matrix.md`](docs/ownership-matrix.md).
 
-**Source of truth for VPS access** — `ansible/secrets/vault.yml` (ansible-vault encrypted). No real IPs, SSH credentials or tokens live in tracked files outside the vault.
+**Source of truth for VPS access** — `ansible/group_vars/all/vault.yml` (ansible-vault encrypted and loaded by Ansible). No real IPs, SSH credentials or tokens live in tracked files outside the vault.
 
 ---
 
@@ -102,7 +102,7 @@ Hard limits. Violating them is a regression.
 
 ### Where they live
 
-- **All secrets** → `ansible/secrets/vault.yml` (ansible-vault AES-256 encrypted, stored encrypted in git).
+- **All secrets** → `ansible/group_vars/all/vault.yml` (ansible-vault AES-256 encrypted, stored encrypted in git).
 - Vault password → `~/.vault_pass.txt` on the control machine (mode `0600`, **not** in git, backed up to a password manager).
 - Schema without values → `ansible/secrets/vault.yml.example` (plaintext, tracked).
 
@@ -140,7 +140,7 @@ Hard limits. Violating them is a regression.
 | Ansible config | `ansible/ansible.cfg` |
 | Inventory | `ansible/inventory/production.yml` |
 | Non-secret vars | `ansible/group_vars/{all,vps}.yml` |
-| Secrets (encrypted) | `ansible/secrets/vault.yml` |
+| Secrets (encrypted) | `ansible/group_vars/all/vault.yml` |
 | Secrets template | `ansible/secrets/vault.yml.example` |
 | Playbooks | `ansible/playbooks/NN-name.yml` |
 | Reusable roles | `ansible/roles/<name>/` |

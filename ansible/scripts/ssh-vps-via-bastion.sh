@@ -15,12 +15,21 @@
 #   VPS_BASTION_HOST=<router_host> VPS_BASTION_USER=<router_user> \
 #     ./ansible/scripts/ssh-vps-via-bastion.sh 'df -h /'
 #   VPS_BASTION_HOST=<router_host> VPS_BASTION_USER=<router_user> \
+#     ./ansible/scripts/ssh-vps-via-bastion.sh --host vps-hostkey-hermes
+#   VPS_BASTION_HOST=<router_host> VPS_BASTION_USER=<router_user> \
 #     ./ansible/scripts/ssh-vps-via-bastion.sh
 
 set -euo pipefail
 
-ANSIBLE_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+ANSIBLE_DIR="$(cd "${SCRIPT_DIR}/.." && pwd)"
 VAULT_FILE="${ANSIBLE_DIR}/group_vars/all/vault.yml"
+HOST_ALIAS="${VPS_TARGET:-vps-prod}"
+
+if [[ "${1:-}" == "--host" ]]; then
+  HOST_ALIAS="${2:?usage: ssh-vps-via-bastion.sh [--host <inventory-host>] [command...]}"
+  shift 2
+fi
 
 if [[ ! -f "${VAULT_FILE}" ]]; then
   echo "ERROR: vault not found at ${VAULT_FILE}" >&2
@@ -33,20 +42,18 @@ fi
 VPS_BASTION_PORT="${VPS_BASTION_PORT:-22}"
 VPS_BASTION_CONNECT_TIMEOUT="${VPS_BASTION_CONNECT_TIMEOUT:-8}"
 
-VAULT_CONTENT=$(ansible-vault view "${VAULT_FILE}")
-VPS_HOST=$(echo "${VAULT_CONTENT}" | awk -F'"' '/^vault_vps_ssh_host:/ {print $2; exit}')
-VPS_USER=$(echo "${VAULT_CONTENT}" | awk -F'"' '/^vault_vps_ssh_user:/ {print $2; exit}')
-VPS_PORT=$(echo "${VAULT_CONTENT}" | awk '/^vault_vps_ssh_port:/ {print $2; exit}')
-VPS_KEY=$(echo "${VAULT_CONTENT}" | awk -F'"' '/^vault_vps_ssh_key:/ {print $2; exit}')
-VPS_PORT="${VPS_PORT:-22}"
+VPS_HOST=$("${SCRIPT_DIR}/vault-get.sh" --host "${HOST_ALIAS}" ssh_host)
+VPS_USER=$("${SCRIPT_DIR}/vault-get.sh" --host "${HOST_ALIAS}" ssh_user)
+VPS_PORT=$("${SCRIPT_DIR}/vault-get.sh" --host "${HOST_ALIAS}" ssh_port)
+VPS_KEY=$("${SCRIPT_DIR}/vault-get.sh" --host "${HOST_ALIAS}" ssh_key)
 
 if [[ -z "${VPS_HOST}" || -z "${VPS_USER}" ]]; then
-  echo "ERROR: vault_vps_ssh_host or vault_vps_ssh_user not set in vault" >&2
+  echo "ERROR: SSH host/user for ${HOST_ALIAS} not set in vault" >&2
   exit 2
 fi
 
 SSH_OPTS=(
-  -p "${VPS_PORT}"
+  -p "${VPS_PORT:-22}"
   -o ControlMaster=no
   -o ControlPath=none
   -o BatchMode=yes
@@ -57,7 +64,10 @@ SSH_OPTS=(
 )
 
 if [[ -n "${VPS_KEY}" ]]; then
-  SSH_OPTS+=(-i "${VPS_KEY}" -o IdentitiesOnly=yes)
+  VPS_KEY="${VPS_KEY/#\~/${HOME}}"
+  if [[ -f "${VPS_KEY}" ]]; then
+    SSH_OPTS+=(-i "${VPS_KEY}" -o IdentitiesOnly=yes)
+  fi
 fi
 
 if [[ $# -eq 0 ]]; then

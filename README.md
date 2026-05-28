@@ -180,10 +180,11 @@ chmod 600 ~/.vault_pass.txt
 ### 3. Fill in the vault
 
 ```bash
-cp ansible/secrets/vault.yml.example ansible/secrets/vault.yml
-# Edit ansible/secrets/vault.yml with your real values:
-#   vault_vps_host, vault_vps_user, vault_ssh_private_key_file, vault_b2_*, vault_tg_*
-ansible-vault encrypt ansible/secrets/vault.yml
+cp ansible/secrets/vault.yml.example ansible/group_vars/all/vault.yml
+# Edit ansible/group_vars/all/vault.yml with your real values:
+#   vault_vps_hosts.<inventory_alias>.ssh_host / ssh_user / ssh_port / ssh_key
+#   plus vault_b2_*, vault_tg_*, and other module secrets.
+ansible-vault encrypt ansible/group_vars/all/vault.yml
 ```
 
 ### 4. Smoke test
@@ -191,8 +192,14 @@ ansible-vault encrypt ansible/secrets/vault.yml
 ```bash
 cd ansible
 ansible -i inventory/production.yml vps -m ping
-# Expected: vps-prod | SUCCESS => {"ping": "pong"}
+# Expected: each ready host in the vps group returns {"ping": "pong"}
 ```
+
+Inventory is multi-VPS:
+
+- `vps` — ready managed hosts. Regular read-only checks and maintenance target this group.
+- `vps_bootstrap` — fresh hosts still being onboarded. Run `00-bootstrap.yml --limit <host>` here, then move the host into `vps`.
+- `vault_vps_hosts.<inventory_alias>` — encrypted per-host SSH values (`ssh_host`, `ssh_user`, `ssh_port`, `ssh_key`).
 
 ### 5. Read-only health check
 
@@ -211,6 +218,17 @@ ansible-playbook playbooks/10-disk-cleanup.yml                  # apply
 ./verify.sh                                                      # services should still be up
 ```
 
+### Add Another VPS
+
+1. Add a public inventory alias under `ansible/inventory/production.yml` in `vps_bootstrap`.
+2. Add the real SSH endpoint under encrypted `vault_vps_hosts.<alias>` in `ansible/group_vars/all/vault.yml`.
+3. Seed root SSH with `./ansible/scripts/ssh-vps.sh --host <alias>` or provider console.
+4. Run `ansible-playbook playbooks/00-bootstrap.yml --limit <alias> --check --diff`.
+5. Apply `00-bootstrap.yml --limit <alias>` only after reviewing the dry-run.
+6. Switch that host's vault `ssh_user` to `deploy`, move it from `vps_bootstrap` to `vps`, then run `./verify.sh --limit <alias>`.
+
+Full runbook: [`docs/runbooks/vps-onboarding.md`](docs/runbooks/vps-onboarding.md).
+
 ---
 
 ## Architecture at a Glance
@@ -222,9 +240,9 @@ flowchart LR
   Agent -->|"reads decision tree"| Runbook["docs/runbooks/*.md"]
   Agent -->|"runs skill"| Skills["CLI modules<br/>(modules/*/bin/)"]
   Agent -->|"runs action"| Playbooks["Ansible playbooks<br/>(deterministic)"]
-  Skills --> VPS[("VPS<br/>+ Docker apps")]
-  Playbooks --> VPS
-  VPS -->|"reports/health/*.json"| Memory[("Structured memory")]
+  Skills --> Fleet[("VPS fleet<br/>Docker hosts + apps")]
+  Playbooks --> Fleet
+  Fleet -->|"reports/health/*.json"| Memory[("Structured memory")]
   Memory --> Agent
   Vault["vault.yml<br/>(encrypted secrets)"] --> Playbooks
 ```
@@ -235,7 +253,7 @@ Three layers, isolated by intent:
 - **Actions** — `ansible/playbooks/*.yml` (deterministic, idempotent) + `modules/*/bin/*` (CLI skills). Every mutating action requires explicit operator approval; read-only checks run freely.
 - **Memory** — `reports/health/*.json` (structured, machine-readable) + `docs/journal/<YYYY-MM>.md` (manual operator notes). The agent reads these to know history.
 
-Secrets live encrypted in `ansible/secrets/vault.yml`; the vault password lives only on the operator's machine.
+Secrets live encrypted in `ansible/group_vars/all/vault.yml`; the vault password lives only on the operator's machine.
 
 ---
 
@@ -245,6 +263,7 @@ Secrets live encrypted in `ansible/secrets/vault.yml`; the vault password lives 
 
 | # | Playbook | Purpose | Mutating? |
 |---|---|---|---|
+| 00 | `00-bootstrap.yml` | Fresh VPS baseline: Docker Engine + Compose plugin, `deploy` user, SSH key, sudo. | yes (one-shot bootstrap) |
 | 10 | `10-disk-cleanup.yml` | One-shot cleanup: apt clean, journal vacuum, filtered docker prune, logrotate. Volumes untouched. | yes |
 | 11a | `11-periodic-cleanup-setup.yml` | Installs `/usr/local/bin/vps-periodic-cleanup.sh` + systemd timer (Sun 03:00 UTC). | yes (one-shot setup) |
 | 11b | `11-schedule-cleanup.yml` | Alternative weekly cleanup timer with `/var/log/vps-weekly-cleanup.log`. | yes (one-shot setup) |
@@ -264,11 +283,11 @@ Before any mutating playbook, run `--check --diff` and review the output. See [`
 |---|---|
 | `./verify.sh` | Wrapper over `99-verify.yml`. Full health check in seconds. |
 | `./modules/dashboard/bin/update-dashboard` | Reads latest `reports/` and rebuilds `docs/dashboard.md`. |
-| `./modules/disk-observatory/bin/disk-report` | Standalone (no Ansible) SSH into VPS for `df` / `du` / `docker df`. |
+| `./modules/disk-observatory/bin/disk-report --host <alias>` | Standalone (no Ansible) SSH into a VPS for `df` / `du` / `docker df`. |
 | `./modules/health-trends/bin/health-trend` | Trend analysis over the last N `reports/health/*.json`. |
-| `./modules/maintenance-journal/bin/cleanup-fetch` | Pulls weekly cleanup logs into `reports/maintenance/<YYYY-MM>.md`. |
-| `./modules/monitoring/bin/run-check` | Manual run of `vps-monitor.py`. Flags: `--test-alert`, `--log`, `--status`. |
-| `./modules/port-audit/bin/port-audit` | Compares live `ss -tlnp` against `docs/ports.md`. Flags new / unsafe bindings. |
+| `./modules/maintenance-journal/bin/cleanup-fetch --host <alias>` | Pulls weekly cleanup logs into `reports/maintenance/<alias>-<YYYY-MM>.md`. |
+| `./modules/monitoring/bin/run-check --host <alias>` | Manual run of `vps-monitor.py`. Flags: `--test-alert`, `--log`, `--status`. |
+| `./modules/port-audit/bin/port-audit --host <alias>` | Compares live `ss -tlnp` against `docs/ports.md`. Flags new / unsafe bindings. |
 | `./modules/secrets-management/bin/secret-scan` | Scans the repo for leaked IPs, keys, tokens. **Run before every commit.** |
 
 ---

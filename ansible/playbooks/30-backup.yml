@@ -19,7 +19,7 @@
 # Schedule: daily at 02:00 UTC (systemd timer, persistent — runs on next boot if missed)
 # Retention: 7 daily, 4 weekly, 3 monthly snapshots
 
-- name: "30 | Restic backup — vps-prod"
+- name: "30 | Restic backup"
   hosts: vps
   gather_facts: false
 
@@ -28,6 +28,8 @@
 
   vars:
     report_dir_local: "{{ playbook_dir }}/../../reports"
+    backup_host_id: "{{ inventory_hostname }}"
+    backup_paths: "{{ vault_backup_paths | default(['/opt/maxtg-bridge/data', '/opt/openclaw/workspace', '/opt/obsidian-vault/wiki']) }}"
     keep_daily:   7
     keep_weekly:  4
     keep_monthly: 3
@@ -54,7 +56,7 @@
         sudo tee /etc/restic/env > /dev/null << ENVEOF
         B2_ACCOUNT_ID={{ vault_b2_key_id }}
         B2_ACCOUNT_KEY={{ vault_b2_app_key }}
-        RESTIC_REPOSITORY=b2:{{ vault_b2_bucket }}:/vps-prod
+        RESTIC_REPOSITORY=b2:{{ vault_b2_bucket }}:/{{ backup_host_id }}
         RESTIC_PASSWORD={{ vault_restic_password }}
         ENVEOF
         sudo chmod 600 /etc/restic/env
@@ -97,17 +99,17 @@
 
         log "=== backup start ==="
         restic backup \
-          /opt/maxtg-bridge/data \
-          /opt/openclaw/workspace \
-          /opt/obsidian-vault/wiki \
-          --tag vps-prod 2>&1 | tee -a "$LOG"
+        {% for path in backup_paths %}
+          {{ path }} \
+        {% endfor %}
+          --tag {{ backup_host_id }} 2>&1 | tee -a "$LOG"
 
         log "--- forget/prune ---"
         restic forget \
           --keep-daily   7 \
           --keep-weekly  4 \
           --keep-monthly 3 \
-          --tag vps-prod \
+          --tag {{ backup_host_id }} \
           --prune 2>&1 | tee -a "$LOG"
 
         log "=== backup done ==="
@@ -179,7 +181,7 @@
 
     - name: "30 | status | snapshots"
       ansible.builtin.raw: |
-        sudo bash -c 'set -a; source /etc/restic/env; set +a; restic snapshots --tag vps-prod 2>&1 || echo "(no snapshots yet)"'
+        sudo bash -c 'set -a; source /etc/restic/env; set +a; restic snapshots --tag {{ backup_host_id }} 2>&1 || echo "(no snapshots yet)"'
       register: snapshots
       changed_when: false
       check_mode: false
@@ -210,9 +212,9 @@
       ansible.builtin.debug:
         msg:
           - "================================================="
-          - "BACKUP SETUP — vps-prod"
+          - "BACKUP SETUP — {{ backup_host_id }}"
           - "================================================="
-          - "Repo:      b2:{{ vault_b2_bucket }}:/vps-prod"
+          - "Repo:      b2:{{ vault_b2_bucket }}:/{{ backup_host_id }}"
           - "Schedule:  daily 02:00 UTC (persistent timer)"
           - "Retention: {{ keep_daily }}d / {{ keep_weekly }}w / {{ keep_monthly }}m"
           - "Log:       /var/log/vps-backup.log"

@@ -10,7 +10,7 @@
 #
 # Report is written to reports/syncthing-audit-<timestamp>.md
 
-- name: "50 | Syncthing audit — vps-prod"
+- name: "50 | Syncthing audit"
   hosts: vps
   gather_facts: false
 

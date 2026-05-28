@@ -4,6 +4,7 @@
 #
 # Usage:
 #   ./modules/maintenance-journal/bin/cleanup-fetch           (current month)
+#   ./modules/maintenance-journal/bin/cleanup-fetch --host vps-hostkey-hermes
 #   ./modules/maintenance-journal/bin/cleanup-fetch --all     (all months found)
 #   ./modules/maintenance-journal/bin/cleanup-fetch --stdout  (print, don't write)
 
@@ -14,13 +15,33 @@ VAULT_FILE="${REPO_ROOT}/ansible/group_vars/all/vault.yml"
 REPORTS_DIR="${REPO_ROOT}/reports/maintenance"
 VPS_LOG="/var/log/vps-periodic-cleanup.log"
 LEGACY_VPS_LOG="/var/log/vps-weekly-cleanup.log"
+SSH_HELPER="${REPO_ROOT}/ansible/scripts/ssh-vps.sh"
 
 WRITE_FILE=1
 FILTER_MONTH=""  # empty = current month only; "all" = all months
-for arg in "$@"; do
-  case "${arg}" in
-    --all)    FILTER_MONTH="all" ;;
-    --stdout) WRITE_FILE=0 ;;
+HOST_ALIAS="${VPS_TARGET:-vps-prod}"
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    --host)
+      HOST_ALIAS="${2:?usage: cleanup-fetch [--host <inventory-host>] [--all] [--stdout]}"
+      shift 2
+      ;;
+    --all)
+      FILTER_MONTH="all"
+      shift
+      ;;
+    --stdout)
+      WRITE_FILE=0
+      shift
+      ;;
+    --help|-h)
+      echo "Usage: cleanup-fetch [--host <inventory-host>] [--all] [--stdout]"
+      exit 0
+      ;;
+    *)
+      echo "ERROR: unknown argument: $1" >&2
+      exit 2
+      ;;
   esac
 done
 
@@ -28,28 +49,14 @@ if [[ -z "${FILTER_MONTH}" ]]; then
   FILTER_MONTH="$(date +%Y-%m)"
 fi
 
-# ---- Read vault for SSH credentials ----
 if [[ ! -f "${VAULT_FILE}" ]]; then
   echo "ERROR: vault not found: ${VAULT_FILE}" >&2
   exit 2
 fi
 
-VAULT_CONTENT=$(ansible-vault view "${VAULT_FILE}")
-VPS_HOST=$(echo "${VAULT_CONTENT}" | awk -F'"' '/^vault_vps_ssh_host:/ {print $2; exit}')
-VPS_USER=$(echo "${VAULT_CONTENT}" | awk -F'"' '/^vault_vps_ssh_user:/ {print $2; exit}')
-VPS_PORT=$(echo "${VAULT_CONTENT}" | awk '/^vault_vps_ssh_port:/ {print $2; exit}')
-VPS_PORT="${VPS_PORT:-22}"
+echo "Fetching ${VPS_LOG} from ${HOST_ALIAS}..." >&2
 
-if [[ -z "${VPS_HOST}" || -z "${VPS_USER}" ]]; then
-  echo "ERROR: vault_vps_ssh_host or vault_vps_ssh_user not set" >&2
-  exit 2
-fi
-
-SSH_OPTS=(-p "${VPS_PORT}" -o ConnectTimeout=10 -o ServerAliveInterval=15 -o BatchMode=yes)
-
-echo "Fetching ${VPS_LOG} from ${VPS_USER}@${VPS_HOST}:${VPS_PORT}..." >&2
-
-REMOTE_PAYLOAD=$(ssh "${SSH_OPTS[@]}" "${VPS_USER}@${VPS_HOST}" \
+REMOTE_PAYLOAD=$("${SSH_HELPER}" --host "${HOST_ALIAS}" \
   "if sudo test -s ${VPS_LOG}; then echo '__LOG_PATH__ ${VPS_LOG}'; sudo cat ${VPS_LOG}; elif sudo test -s ${LEGACY_VPS_LOG}; then echo '__LOG_PATH__ ${LEGACY_VPS_LOG}'; sudo cat ${LEGACY_VPS_LOG}; else echo '__MISSING__'; fi" 2>/dev/null)
 
 if [[ "${REMOTE_PAYLOAD}" == "__MISSING__" ]] || [[ -z "${REMOTE_PAYLOAD}" ]]; then
@@ -151,9 +158,9 @@ mkdir -p "${REPORTS_DIR}"
 
 for ((i = 0; i < ${#MONTH_KEYS[@]}; i++)); do
   month="${MONTH_KEYS[$i]}"
-  REPORT_PATH="${REPORTS_DIR}/${month}.md"
-  CONTENT="# Maintenance journal — ${month}"$'\n\n'
-  CONTENT+="Weekly cleanup sessions fetched from VPS (\`${FETCHED_LOG}\`)."$'\n\n'
+  REPORT_PATH="${REPORTS_DIR}/${HOST_ALIAS}-${month}.md"
+  CONTENT="# Maintenance journal — ${HOST_ALIAS} — ${month}"$'\n\n'
+  CONTENT+="Weekly cleanup sessions fetched from \`${HOST_ALIAS}\` (\`${FETCHED_LOG}\`)."$'\n\n'
   CONTENT+="---"$'\n\n'
   CONTENT+="${MONTH_CONTENTS[$i]}"
 

@@ -5,7 +5,7 @@
 
 ## Context
 
-Multiple projects deploy to the same VPS. Each historically maintained its own copy of access credentials (VPS host, SSH key path, deploy user, etc.) in its own inventory or `.env`. This led to:
+Multiple projects deploy to one or more VPS hosts. Each historically maintained its own copy of access credentials (VPS host, SSH key path, deploy user, etc.) in its own inventory or `.env`. This led to:
 
 - Drift when one project's IP / port / key changed and others were not updated.
 - Real values leaking into project READMEs because there was no canonical place to look them up.
@@ -13,9 +13,9 @@ Multiple projects deploy to the same VPS. Each historically maintained its own c
 
 ## Decision
 
-`ansible/secrets/vault.yml` (encrypted with ansible-vault, AES-256) is the **single source of truth** for every VPS access credential.
+`ansible/group_vars/all/vault.yml` (encrypted with ansible-vault, AES-256) is the **single source of truth** for every VPS access credential.
 
-- The vault holds: VPS host, SSH user, SSH port, SSH private-key path, deploy user, alert tokens, backup credentials, and any third-party API tokens used from the VPS context.
+- The vault holds: per-host SSH coordinates under `vault_vps_hosts.<inventory_alias>`, deploy user keys, alert tokens, backup credentials, and any third-party API tokens used from the VPS context.
 - Every other project that needs a VPS credential reads it via `ansible-vault view` or via a placeholder that is filled in from the vault at deploy time.
 - The vault password (`~/.vault_pass.txt`) lives only on the operator's control machine, mode `0600`, with an offsite encrypted backup.
 - A schema-only template lives at `ansible/secrets/vault.yml.example` (plaintext, in git) so new clones know which keys to fill.

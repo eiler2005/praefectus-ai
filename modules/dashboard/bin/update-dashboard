@@ -25,6 +25,7 @@ HEALTH_DISK="?"
 HEALTH_MEM="?"
 HEALTH_LOAD="?"
 HEALTH_SWAP="?"
+HEALTH_HOST="all"
 
 if command -v python3 &>/dev/null; then
   LATEST_JSON=$(ls -t "${HEALTH_DIR}"/*.json 2>/dev/null | head -1 || true)
@@ -40,6 +41,7 @@ print(m.get("disk_pct", "?"))
 print(m.get("mem_available_mb", "?"))
 print(m.get("load_5min", "?"))
 print(m.get("swap_used_pct", "?"))
+print(d.get("host", "all"))
 PYEOF
 )
     HEALTH_STATUS=$(echo "${HEALTH_DATA}" | sed -n '1p')
@@ -48,6 +50,7 @@ PYEOF
     HEALTH_MEM=$(echo "${HEALTH_DATA}" | sed -n '4p')
     HEALTH_LOAD=$(echo "${HEALTH_DATA}" | sed -n '5p')
     HEALTH_SWAP=$(echo "${HEALTH_DATA}" | sed -n '6p')
+    HEALTH_HOST=$(echo "${HEALTH_DATA}" | sed -n '7p')
   fi
 fi
 
@@ -114,7 +117,7 @@ PYEOF
 fi
 
 # ---- Build dashboard ----
-DASHBOARD_CONTENT="# VPS dashboard — vps-prod
+DASHBOARD_CONTENT="# VPS dashboard — ${HEALTH_HOST}
 
 > Updated: ${TS_NOW}
 

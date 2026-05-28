@@ -18,7 +18,7 @@
 # Allowlist for fail2ban (skip these IPs):
 #   vault_fail2ban_trusted_ips: ["192.168.1.0/24"]  in vault.yml
 
-- name: "40 | Security hardening — vps-prod"
+- name: "40 | Security hardening"
   hosts: vps
   gather_facts: false
 

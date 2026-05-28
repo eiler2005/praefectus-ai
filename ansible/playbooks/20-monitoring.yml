@@ -62,7 +62,7 @@
       ansible.builtin.debug:
         msg:
           - "============================================"
-          - "MONITORING INSTALLED — vps-prod"
+          - "MONITORING INSTALLED — {{ inventory_hostname }}"
           - "============================================"
           - "Timer: vps-monitor.timer (every 5 min)"
           - "Script: /usr/local/bin/vps-monitor.py"

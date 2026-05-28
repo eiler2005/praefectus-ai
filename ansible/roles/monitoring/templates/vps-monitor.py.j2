@@ -9,6 +9,7 @@ import sys, os, json, time, subprocess, datetime, argparse, urllib.request, urll
 TG_BOT_TOKEN = "{{ vault_tg_infra_bot_token | default('') }}"
 TG_CHAT_ID   = "{{ vault_tg_infra_chat_id | default('') }}"
 TG_TOPIC_ID  = "{{ vault_tg_infra_topic_id | default('') }}"
+HOST_NAME    = "{{ inventory_hostname }}"
 
 DISK_WARN_PCT = {{ verify_disk_warn_pct | default(80) }}
 DISK_CRIT_PCT = {{ verify_disk_crit_pct | default(90) }}
@@ -19,7 +20,7 @@ LOAD_CRIT     = {{ loadavg_crit | default(4.0) }}
 SWAP_WARN_PCT = 80
 
 EXPECTED_CONTAINERS = [
-{% for c in vault_expected_containers | default([]) %}
+{% for c in expected_containers | default([]) %}
     "{{ c.name }}",
 {% endfor %}
 ]
@@ -98,7 +99,7 @@ def alert(key, text, level="warn", state=None, force=False):
             return
     emoji = "🟡" if level == "warn" else "🔴"
     silent = (level == "warn")
-    msg = f"{emoji} <b>{level.upper()}</b> | vps-prod\n{text}"
+    msg = f"{emoji} <b>{level.upper()}</b> | {HOST_NAME}\n{text}"
     log(f"ALERT [{level}] {key}: {text[:80]}")
     ok = send_telegram(msg, silent=silent)
     if ok and state is not None:
@@ -210,7 +211,7 @@ def maybe_send_heartbeat(metrics, state):
     running_cnt = len(metrics["running_containers"])
     expected_cnt = len(EXPECTED_CONTAINERS)
     text = (
-        f"✅ <b>vps-prod alive</b>\n"
+        f"✅ <b>{HOST_NAME} alive</b>\n"
         f"disk: {metrics['disk_pct']}%  "
         f"mem: {metrics['mem_avail_mb']}M avail  "
         f"load: {metrics['load_5min']:.2f}\n"
@@ -225,7 +226,7 @@ def maybe_send_heartbeat(metrics, state):
 def run_once(test_alert=False):
     if test_alert:
         log("Sending test alert to Telegram...")
-        ok = send_telegram("🧪 <b>TEST</b> | vps-monitor test alert from vps-prod", silent=True)
+        ok = send_telegram(f"🧪 <b>TEST</b> | vps-monitor test alert from {HOST_NAME}", silent=True)
         log("OK" if ok else "FAILED (check TG tokens in vault)")
         return 0
 
