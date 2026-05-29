@@ -10,10 +10,10 @@ Full navigation index for the repository: what's here, where it lives, when to u
 
 | I want to | Command / document |
 |---|---|
-| Check VPS health right now | `./verify.sh` |
+| Check VPS health right now | `./verify.sh` (all `vps` hosts) |
 | Current snapshot of state | [`docs/dashboard.md`](dashboard.md) (refresh: `./modules/dashboard/bin/update-dashboard`) |
 | Understand who owns what on the host | [`ownership-matrix.md`](ownership-matrix.md) |
-| Free up disk space | `ansible-playbook playbooks/10-disk-cleanup.yml --check` → apply |
+| Free up disk space | `ansible-playbook playbooks/10-disk-cleanup.yml --check` → apply (all `vps` hosts; add `--limit <inventory-host>` for one) |
 | Run a manual health check + Telegram alert | `./modules/monitoring/bin/run-check` |
 | Threat model and recovery boundaries | [`SECURITY.md`](../SECURITY.md) |
 | Agent contract and safety rules | [`AGENTS.md`](../AGENTS.md) |
@@ -38,6 +38,11 @@ Full navigation index for the repository: what's here, where it lives, when to u
 
 Before any mutating playbook, run `--check --diff` and review the output (see [AGENTS.md](../AGENTS.md) safety rules).
 
+Most playbooks target the `vps` inventory group, so they cover every managed VPS
+by default. When a task is intentionally single-host, pass `--limit
+<inventory-host>` to Ansible or `--host <inventory-host>` to helper scripts, and
+name that host in the operator-facing answer.
+
 ---
 
 ## CLI utilities (`modules/<name>/bin/`)
@@ -46,7 +51,7 @@ Before any mutating playbook, run `--check --diff` and review the output (see [A
 |---|---|---|
 | `./verify.sh` | Wrapper over `99-verify.yml`. Full health check in seconds. | Before / after any mutating action |
 | [`modules/dashboard/bin/update-dashboard`](../modules/dashboard/bin/update-dashboard) | Reads latest `reports/health/*.json` + cleanup / syncthing reports, regenerates `docs/dashboard.md`. | When you want a fresh state snapshot without SSH |
-| [`modules/disk-observatory/bin/disk-report`](../modules/disk-observatory/bin/disk-report) | Standalone (no Ansible) SSH into VPS for `df` / `du` / `docker df`; prints + saves to `reports/`. | Quick disk audit without a playbook |
+| [`modules/disk-observatory/bin/disk-report`](../modules/disk-observatory/bin/disk-report) | Standalone (no Ansible) SSH into one VPS for `df` / `du` / `docker df`; use `--host <inventory-host>` in multi-host repos. | Quick single-host disk audit without a playbook |
 | [`modules/health-trends/bin/health-trend`](../modules/health-trends/bin/health-trend) | Trend analysis over the last N `reports/health/*.json`: disk, swap, memory trend, unstable containers. Flags: `--last N`, `--trend disk`. | When you want a trajectory, not a snapshot |
 | [`modules/maintenance-journal/bin/cleanup-fetch`](../modules/maintenance-journal/bin/cleanup-fetch) | Pulls `/var/log/vps-periodic-cleanup.log` from VPS, aggregates by week into `reports/maintenance/<YYYY-MM>.md`. Flags: `--all`, `--stdout`. | Monthly review of what the auto-cleanup timer did |
 | [`modules/monitoring/bin/run-check`](../modules/monitoring/bin/run-check) | Runs `vps-monitor.py --once` on VPS. Flags: `--test-alert`, `--log`, `--status`. | Manual check outside the 5 min timer |

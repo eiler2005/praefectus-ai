@@ -68,13 +68,18 @@ Expected: timer `active`; service after the oneshot-run is `inactive`, not `fail
 Run after `verify.sh` reports something, or as needed.
 
 ```bash
-# Manual cleanup (writes reports/cleanup-*.md)
+# Manual cleanup for every host in the vps inventory group
+# (writes reports/cleanup-*.md per host)
 ansible-playbook playbooks/10-disk-cleanup.yml --check
 ansible-playbook playbooks/10-disk-cleanup.yml
 
 # Sanity check
 ./verify.sh
 ```
+
+For a single VPS, add `--limit <inventory-host>` to both playbook commands and
+to `./verify.sh`. If the operator does not name a host in a multi-VPS inventory,
+check all hosts or ask for the intended target before mutating only one.
 
 ---
 

@@ -12,8 +12,26 @@ What to do when the VPS root filesystem fills. From mild (≥ 80 %) to critical 
 
 Never clean blindly. Find out what grew.
 
+### Scope first
+
+This repository can manage more than one VPS. For any disk question, report one
+line per host in the `vps` inventory group unless the operator explicitly names a
+single target.
+
+- Default scope for Ansible checks/cleanup: all hosts in `vps`.
+- Single-host scope: only with an explicit `--limit <inventory-host>` or
+  `./ansible/scripts/ssh-vps.sh --host <inventory-host> ...`.
+- If the operator says "the VPS" and the inventory has multiple hosts, ask which
+  host they mean or run the read-only audit across all hosts and say so.
+- Final answers must name the inventory host(s) covered, not just "the VPS".
+
+Inventory aliases are public labels; real SSH endpoints remain in the vault.
+
 ```bash
-./modules/disk-observatory/bin/disk-report
+./verify.sh
+
+# Optional deep single-host audit after the all-host verify:
+./modules/disk-observatory/bin/disk-report --host <inventory-host>
 ```
 
 Read the report. Pay attention to:
@@ -34,6 +52,9 @@ ansible-playbook playbooks/10-disk-cleanup.yml
 ./verify.sh
 ```
 
+These commands target all hosts in the `vps` group. To clean exactly one host,
+add `--limit <inventory-host>` to both playbook commands and to `./verify.sh`.
+
 This typically frees 1–5 GB on a working server (apt cache + journal vacuum + docker image prune older than 7 days).
 
 If `verify.sh` is green and disk is < 80 % afterwards — done.
@@ -47,8 +68,8 @@ Possible causes:
 2. **Recent docker images** that the `until=168h` filter did not catch. Check active image IDs and recent rollback tags:
 
    ```bash
-   ssh deploy@<vps> 'docker ps -q | xargs -r docker inspect --format "{{.Name}} {{.Config.Image}} {{.Image}}"'
-   ssh deploy@<vps> 'docker images --format "{{.ID}} {{.CreatedAt}} {{.Size}} {{.Repository}}:{{.Tag}}" | sort -k2r'
+   ./ansible/scripts/ssh-vps.sh --host <inventory-host> 'docker ps -q | xargs -r docker inspect --format "{{.Name}} {{.Config.Image}} {{.Image}}"'
+   ./ansible/scripts/ssh-vps.sh --host <inventory-host> 'docker images --format "{{.ID}} {{.CreatedAt}} {{.Size}} {{.Repository}}:{{.Tag}}" | sort -k2r'
    ```
 
    When pruning rollbacks: keep the image ID used by the running container, the `latest` tag, and at least one most-recent unused rollback. Remove the rest.
@@ -56,7 +77,7 @@ Possible causes:
 3. **Dangling volumes** — manual review only. For each volume in `disk-report`:
 
    ```bash
-   ssh deploy@<vps> 'docker volume inspect <name>'
+   ./ansible/scripts/ssh-vps.sh --host <inventory-host> 'docker volume inspect <name>'
    ```
 
    - If the `Mountpoint` is empty or contains only tmp data → `docker volume rm <name>`.
@@ -65,7 +86,7 @@ Possible causes:
 4. **Build cache that did not prune** — the `until=` filter sometimes behaves oddly on older docker. Check:
 
    ```bash
-   ssh deploy@<vps> 'docker buildx du'
+   ./ansible/scripts/ssh-vps.sh --host <inventory-host> 'docker buildx du'
    ```
 
    When desperately needed: `docker buildx prune -af` (no filter — but this is **only** build cache, not runtime images).
@@ -93,34 +114,34 @@ Don't panic. Apply in order:
 1. **Snapshot:**
 
    ```bash
-   ssh deploy@<vps> 'df -h /; df -ih /; sudo du -xhd1 / /var /opt /home /root 2>/dev/null | sort -hr | head -50'
+   ./ansible/scripts/ssh-vps.sh --host <inventory-host> 'df -h /; df -ih /; sudo du -xhd1 / /var /opt /home /root 2>/dev/null | sort -hr | head -50'
    ```
 
 2. **Vacuum journals manually:**
 
    ```bash
-   ssh deploy@<vps> 'sudo journalctl --vacuum-size=100M'
+   ./ansible/scripts/ssh-vps.sh --host <inventory-host> 'sudo journalctl --vacuum-size=100M'
    ```
 
 3. **Old kernel packages:**
 
    ```bash
-   ssh deploy@<vps> 'sudo apt-get autoremove --purge -y'
+   ./ansible/scripts/ssh-vps.sh --host <inventory-host> 'sudo apt-get autoremove --purge -y'
    ```
 
 4. **Large log files of specific services:**
 
    ```bash
-   ssh deploy@<vps> 'sudo find /var/log -type f -size +100M -exec ls -lh {} \;'
+   ./ansible/scripts/ssh-vps.sh --host <inventory-host> 'sudo find /var/log -type f -size +100M -exec ls -lh {} \;'
    # For each one (only if you know what you're doing): sudo truncate -s 0 <path>
    ```
 
 5. **Safe host-side docker prune:**
 
    ```bash
-   ssh deploy@<vps> 'docker container prune -f --filter "until=72h"'
-   ssh deploy@<vps> 'docker image prune -af --filter "until=168h"'
-   ssh deploy@<vps> 'docker builder prune -af --filter "until=168h"'
+   ./ansible/scripts/ssh-vps.sh --host <inventory-host> 'docker container prune -f --filter "until=72h"'
+   ./ansible/scripts/ssh-vps.sh --host <inventory-host> 'docker image prune -af --filter "until=168h"'
+   ./ansible/scripts/ssh-vps.sh --host <inventory-host> 'docker builder prune -af --filter "until=168h"'
    ```
 
    Volumes are never pruned automatically.
