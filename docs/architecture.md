@@ -41,7 +41,7 @@ This split lets you:
 
 - **Bootstrap** — `00-bootstrap.yml` brings a fresh VM to a known baseline state: Docker Engine, Compose plugin, `deploy` user, SSH key, and sudo.
 - **Maintenance** — `10-disk-cleanup.yml`, `11-periodic-cleanup-setup.yml`, `20-monitoring.yml`, `30-backup.yml`, `40-security.yml`.
-- **Limits** — `60-docker-limits.yml`, `70-docker-limits-critical.yml` (host-side `mem_limit` policy via override files).
+- **Limits** — `60-docker-limits.yml`, `70-docker-limits-critical.yml` (host-side resource policy via override files).
 - **Audit / verify** — `99-verify.yml` read-only health gate.
 - **Secrets** — single Ansible Vault for every VPS-access credential.
 

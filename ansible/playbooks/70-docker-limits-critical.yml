@@ -1,9 +1,9 @@
 ---
-# Applies memory limits to critical containers.
+# Applies resource limits to critical containers.
 #
 # Uses TWO mechanisms:
 #   1. docker-compose.override.local.yml — persistent (active on next compose up)
-#   2. docker update --memory      — immediate (no restart needed)
+#   2. docker update --memory/--cpus/--pids-limit — immediate (no restart needed)
 #
 # Out of scope (other owners' zones):
 #   - routing-side containers managed by the routing project
@@ -13,20 +13,25 @@
 #   List services explicitly. Some compose files contain auxiliary services
 #   (e.g. cron bridges) that should NOT be started from this directory.
 #
-# Restart commands (run manually after verification):
-#   cd /opt/<app> && sudo docker compose \
-#     -f docker-compose.yml -f docker-compose.override.yml -f docker-compose.override.local.yml \
-#     up -d <service-1> <service-2>
+# Restart commands are documented in each generated override file. Keep those
+# comments on one physical line each: heredocs can mangle trailing backslashes.
 
-- name: "70 | Docker memory limits — critical services"
+- name: "70 | Docker resource limits — critical services"
   hosts: vps
   gather_facts: false
 
   vars:
     mem_openclaw_gateway: "{{ vault_mem_openclaw_gateway | default('1224m') }}"
     mem_omniroute:        "{{ vault_mem_omniroute        | default('512m') }}"
-    mem_lightrag:         "{{ vault_mem_lightrag         | default('192m') }}"
+    mem_lightrag:         "{{ vault_mem_lightrag         | default('1536m') }}"
     mem_redis:            "{{ vault_mem_redis            | default('256m') }}"
+    cpu_openclaw_gateway: "{{ vault_cpu_openclaw_gateway | default('0.90') }}"
+    cpu_omniroute:        "{{ vault_cpu_omniroute        | default('0.25') }}"
+    cpu_lightrag:         "{{ vault_cpu_lightrag         | default('0.45') }}"
+    cpu_ai_path_cap:      "{{ vault_cpu_ai_path_cap      | default('1.60') }}"
+    pids_openclaw_gateway: "{{ vault_pids_openclaw_gateway | default(256) }}"
+    pids_omniroute:        "{{ vault_pids_omniroute        | default(128) }}"
+    pids_lightrag:         "{{ vault_pids_lightrag         | default(128) }}"
 
   tasks:
     # ---- AUDIT ----
@@ -42,47 +47,65 @@
       ansible.builtin.debug:
         msg: "{{ docker_stats.stdout_lines }}"
 
+    - name: "70 | audit | managed app dirs present"
+      ansible.builtin.raw: |
+        for d in /opt/openclaw /opt/lightrag /opt/integration-bus; do
+          if [ -d "$d" ]; then echo "$d:present"; else echo "$d:absent"; fi
+        done
+      register: app_dirs
+      changed_when: false
+      failed_when: false
+      check_mode: false
+
+    - name: "70 | audit | display app dirs"
+      ansible.builtin.debug:
+        msg: "{{ app_dirs.stdout_lines | default([]) }}"
+
     # ---- OVERRIDE FILES ----
 
     # gateway + router-service in the same /opt/<app>/ — both go in one override file
-    - name: "70 | limits | openclaw-gateway ({{ mem_openclaw_gateway }}) + omniroute ({{ mem_omniroute }})"
+    - name: "70 | limits | openclaw-gateway ({{ cpu_openclaw_gateway }} CPU, {{ mem_openclaw_gateway }}) + omniroute ({{ cpu_omniroute }} CPU, {{ mem_omniroute }})"
       ansible.builtin.raw: |
         sudo tee /opt/openclaw/docker-compose.override.local.yml > /dev/null << 'EOF'
-        # Managed by vps_management — host-level memory constraints only.
+        # Managed by vps_management — host-level resource constraints only.
         # Do NOT edit service definitions here.
         # Restart ONLY the listed services (some compose files include unrelated services):
-        #   cd /opt/openclaw && sudo docker compose \
-        #     -f docker-compose.yml -f docker-compose.override.yml -f docker-compose.override.local.yml \
-        #     up -d openclaw-gateway omniroute
+        #   cd /opt/openclaw && sudo docker compose -f docker-compose.yml -f docker-compose.override.yml -f docker-compose.override.local.yml up -d openclaw-gateway omniroute
         services:
           openclaw-gateway:
+            cpus: "{{ cpu_openclaw_gateway }}"
             mem_limit: {{ mem_openclaw_gateway }}
             memswap_limit: {{ mem_openclaw_gateway }}
+            pids_limit: {{ pids_openclaw_gateway }}
           omniroute:
+            cpus: "{{ cpu_omniroute }}"
             mem_limit: {{ mem_omniroute }}
             memswap_limit: {{ mem_omniroute }}
+            pids_limit: {{ pids_omniroute }}
         EOF
         echo CHANGED
       register: r_openclaw
       changed_when: "'CHANGED' in r_openclaw.stdout"
+      when: "'/opt/openclaw:present' in app_dirs.stdout_lines"
 
     # lightrag project
-    - name: "70 | limits | lightrag ({{ mem_lightrag }})"
+    - name: "70 | limits | lightrag ({{ cpu_lightrag }} CPU, {{ mem_lightrag }})"
       ansible.builtin.raw: |
         sudo tee /opt/lightrag/docker-compose.override.local.yml > /dev/null << 'EOF'
-        # Managed by vps_management — host-level memory constraints only.
+        # Managed by vps_management — host-level resource constraints only.
         # Restart:
-        #   cd /opt/lightrag && sudo docker compose \
-        #     -f docker-compose.yml -f docker-compose.override.yml -f docker-compose.override.local.yml \
-        #     up -d
+        #   cd /opt/lightrag && sudo docker compose -f docker-compose.yml -f docker-compose.override.yml -f docker-compose.override.local.yml up -d
         services:
           lightrag:
+            cpus: "{{ cpu_lightrag }}"
             mem_limit: {{ mem_lightrag }}
             memswap_limit: {{ mem_lightrag }}
+            pids_limit: {{ pids_lightrag }}
         EOF
         echo CHANGED
       register: r_lightrag
       changed_when: "'CHANGED' in r_lightrag.stdout"
+      when: "'/opt/lightrag:present' in app_dirs.stdout_lines"
 
     # integration-bus project: redis
     - name: "70 | limits | redis ({{ mem_redis }})"
@@ -90,9 +113,7 @@
         sudo tee /opt/integration-bus/docker-compose.override.local.yml > /dev/null << 'EOF'
         # Managed by vps_management — host-level memory constraints only.
         # Restart:
-        #   cd /opt/integration-bus && sudo docker compose \
-        #     -f docker-compose.yml -f docker-compose.override.local.yml \
-        #     up -d
+        #   cd /opt/integration-bus && sudo docker compose -f docker-compose.yml -f docker-compose.override.local.yml up -d
         services:
           redis:
             mem_limit: {{ mem_redis }}
@@ -101,26 +122,49 @@
         echo CHANGED
       register: r_redis
       changed_when: "'CHANGED' in r_redis.stdout"
+      when: "'/opt/integration-bus:present' in app_dirs.stdout_lines"
 
     # ---- APPLY IMMEDIATELY VIA docker update (no restart) ----
     - name: "70 | apply | docker update — apply limits without restart"
       ansible.builtin.raw: |
-        sudo docker update \
-          --memory={{ mem_openclaw_gateway }} \
-          --memory-swap={{ mem_openclaw_gateway }} \
-          openclaw-openclaw-gateway-1 && echo "gateway: ok" || echo "gateway: FAILED"
-        sudo docker update \
-          --memory={{ mem_omniroute }} \
-          --memory-swap={{ mem_omniroute }} \
-          omniroute && echo "omniroute: ok" || echo "omniroute: FAILED"
-        sudo docker update \
-          --memory={{ mem_lightrag }} \
-          --memory-swap={{ mem_lightrag }} \
-          lightrag-lightrag-1 && echo "lightrag: ok" || echo "lightrag: FAILED"
-        sudo docker update \
-          --memory={{ mem_redis }} \
-          --memory-swap={{ mem_redis }} \
-          integration-bus-redis && echo "redis: ok" || echo "redis: FAILED"
+        if sudo docker inspect openclaw-openclaw-gateway-1 >/dev/null 2>&1; then
+          sudo docker update \
+            --cpus={{ cpu_openclaw_gateway }} \
+            --memory={{ mem_openclaw_gateway }} \
+            --memory-swap={{ mem_openclaw_gateway }} \
+            --pids-limit={{ pids_openclaw_gateway }} \
+            openclaw-openclaw-gateway-1 && echo "gateway: ok" || echo "gateway: FAILED"
+        else
+          echo "gateway: skipped (container absent)"
+        fi
+        if sudo docker inspect omniroute >/dev/null 2>&1; then
+          sudo docker update \
+            --cpus={{ cpu_omniroute }} \
+            --memory={{ mem_omniroute }} \
+            --memory-swap={{ mem_omniroute }} \
+            --pids-limit={{ pids_omniroute }} \
+            omniroute && echo "omniroute: ok" || echo "omniroute: FAILED"
+        else
+          echo "omniroute: skipped (container absent)"
+        fi
+        if sudo docker inspect lightrag-lightrag-1 >/dev/null 2>&1; then
+          sudo docker update \
+            --cpus={{ cpu_lightrag }} \
+            --memory={{ mem_lightrag }} \
+            --memory-swap={{ mem_lightrag }} \
+            --pids-limit={{ pids_lightrag }} \
+            lightrag-lightrag-1 && echo "lightrag: ok" || echo "lightrag: FAILED"
+        else
+          echo "lightrag: skipped (container absent)"
+        fi
+        if sudo docker inspect integration-bus-redis >/dev/null 2>&1; then
+          sudo docker update \
+            --memory={{ mem_redis }} \
+            --memory-swap={{ mem_redis }} \
+            integration-bus-redis && echo "redis: ok" || echo "redis: FAILED"
+        else
+          echo "redis: skipped (container absent)"
+        fi
       register: r_update
       changed_when: "': ok' in r_update.stdout"
 
@@ -130,17 +174,12 @@
 
     # ---- VERIFY ----
     - name: "70 | verify | current limits (docker inspect)"
-      ansible.builtin.raw: |
-        docker inspect openclaw-openclaw-gateway-1 omniroute lightrag-lightrag-1 integration-bus-redis 2>/dev/null | python3 -c "
-        import json,sys
-        data = json.load(sys.stdin)
-        for c in data:
-            name = c['Name'].lstrip('/')
-            mem  = c['HostConfig']['Memory']
-            swap = c['HostConfig']['MemorySwap']
-            mb   = mem // 1024 // 1024
-            print(f'{name}: {mb}MB limit, swap={swap//1024//1024}MB')
-        "
+      ansible.builtin.raw: !unsafe |
+        for c in openclaw-openclaw-gateway-1 omniroute lightrag-lightrag-1 integration-bus-redis; do
+          sudo docker inspect "$c" \
+            --format "$c NanoCpus={{.HostConfig.NanoCpus}} Memory={{.HostConfig.Memory}} MemorySwap={{.HostConfig.MemorySwap}} PidsLimit={{.HostConfig.PidsLimit}}" \
+            2>/dev/null || true
+        done
       register: r_verify
       changed_when: false
 
@@ -166,10 +205,10 @@
           - "================================================="
           - "DOCKER LIMITS CRITICAL SUMMARY"
           - "================================================="
-          - "openclaw-gateway:   {{ mem_openclaw_gateway }}  (override: {{ r_openclaw.changed }}, update: applied)"
-          - "omniroute:          {{ mem_omniroute }}   (override: {{ r_openclaw.changed }}, update: applied)"
-          - "lightrag:           {{ mem_lightrag }}   (override: {{ r_lightrag.changed }}, update: applied)"
-          - "redis:              {{ mem_redis }}   (override: {{ r_redis.changed }}, update: applied)"
+          - "openclaw-gateway:   {{ cpu_openclaw_gateway }} CPU / {{ mem_openclaw_gateway }} / pids {{ pids_openclaw_gateway }}  (override: {{ r_openclaw.changed | default(false) }})"
+          - "omniroute:          {{ cpu_omniroute }} CPU / {{ mem_omniroute }} / pids {{ pids_omniroute }}   (override: {{ r_openclaw.changed | default(false) }})"
+          - "lightrag:           {{ cpu_lightrag }} CPU / {{ mem_lightrag }} / pids {{ pids_lightrag }}   (override: {{ r_lightrag.changed | default(false) }})"
+          - "redis:              {{ mem_redis }}   (override: {{ r_redis.changed | default(false) }})"
           - "================================================="
           - "Limits applied IMMEDIATELY via docker update (no restart)."
           - "Override files written for persistence on the next compose up."
@@ -187,6 +226,7 @@
           - "  bridge-service:      256MB"
           - "  routing zone (est):  ~360MB (no limit)"
           - "  OS + kernel (est):   ~350MB"
+          - "  CPU cap, AI path:    {{ cpu_ai_path_cap }} of 2.00 vCPU"
           - "================================================="
           - "When one service exceeds its limit, the others remain protected."
           - "Verify: ansible-playbook playbooks/99-verify.yml"

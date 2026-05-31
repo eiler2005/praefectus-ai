@@ -53,7 +53,7 @@ PraefectusAI may (and should) impose host policy via `docker-compose.override.lo
 
 - Is written by ansible (`60-docker-limits.yml`, `70-docker-limits-critical.yml`).
 - Is **not** managed by the application owner.
-- Contains **only** host-level constraints: `mem_limit`, `cpus`, `restart`, `logging.driver`.
+- Contains **only** host-level constraints: `mem_limit`, `memswap_limit`, `cpus`, `pids_limit`, `restart`, `logging.driver`.
 - Does not change services, ports, env, or volumes.
 - Is picked up automatically: `docker compose up` reads `docker-compose.yml + docker-compose.override.yml + docker-compose.override.local.yml`.
 
@@ -64,7 +64,9 @@ Example:
 services:
   <service-name>:
     mem_limit: 512m
+    memswap_limit: 512m
     cpus: 0.5
+    pids_limit: 128
     restart: unless-stopped
     logging:
       driver: json-file
