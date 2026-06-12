@@ -84,9 +84,64 @@ The VPS-side pieces for this lane are owned by `router_configuration`:
 - `/usr/local/sbin/channel-m-reverse-firewall.sh`
 - `channel-m-reverse-firewall.service`
 - `channel-m-reverse-firewall.timer`
+- `/usr/local/sbin/channel-m-reverse-listener-watchdog.sh`
+- `channel-m-reverse-listener-watchdog.service`
+- `channel-m-reverse-listener-watchdog.timer`
 
 They keep `18057/tcp` bridge-scoped. The port must not become a public UFW or
-cloud-firewall allow.
+cloud-firewall allow. The listener watchdog removes stale SSH reverse listeners
+that remain bound but no longer forward to the home router, so the next router
+cron recovery can recreate the tunnel.
+
+GhostRoute Channel D is a router-owned home-WAN lane, not a VPS listener:
+selected Karing/NaiveProxy-style clients reach the home endpoint on `:4444`,
+the home router's Caddy `forward_proxy@naive` relays into a router-local
+`channel-d-naiveproxy-socks-in`, and the router applies its managed split.
+PraefectusAI must not add `4444/tcp` to VPS UFW rules, cloud-firewall rules, or
+`docs/ports.md` expected VPS listeners.
+
+GhostRoute Console may be served on standard HTTPS `:443` by host/SNI through
+the routing-owned reverse proxy, while the dedicated `2087/tcp` Console listener
+remains documented as a configured public path. PraefectusAI records these
+exposures but does not own the reverse-proxy config.
+
+### Runtime schemes
+
+Channel M active service egress:
+
+```text
+maxtg_bridge container
+  -> Docker bridge gateway:18057 on VPS
+  -> OpenSSH reverse listener scoped by permitlisten
+  -> home router loopback Channel M ingress
+  -> router sing-box channel-m-maxtg-reverse-egress
+  -> direct-out / home WAN
+  -> MAX API/CDN
+```
+
+Channel M stale-listener recovery:
+
+```text
+channel-m-reverse-listener-watchdog.timer
+  -> checks Docker bridge listener on 18057
+  -> sends HTTP CONNECT probe through the reverse listener
+  -> kills stale VPS sshd listener only when it no longer forwards
+  -> router cron recreates the SSH -R tunnel
+```
+
+Channel D selected-client lane:
+
+```text
+Karing / NaiveProxy-style client
+  -> home router WAN :4444
+  -> router Caddy forward_proxy@naive
+  -> router-local sing-box channel-d-naiveproxy-socks-in
+  -> managed destinations: reality-out -> VPS egress
+  -> non-managed destinations: direct-out -> home WAN
+```
+
+VPS invariant: `18057/tcp` is restricted to the Docker bridge, and `4444/tcp`
+must not appear as a VPS listener.
 
 ## Vault as single source of truth
 

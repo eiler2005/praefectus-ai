@@ -13,14 +13,16 @@ This document is meant to be **forked and customised** for your deployment. The 
 | `/etc/fail2ban/` | PraefectusAI | jails | Yes |
 | `/etc/systemd/system/` | PraefectusAI | host-level units (monitoring, backup) | Yes for own units only |
 | `/etc/systemd/system/channel-m-reverse-firewall.*` | `router_configuration` | Channel M reverse docker bridge firewall persistence | No; verify only from this repo |
+| `/etc/systemd/system/channel-m-reverse-listener-watchdog.*` | `router_configuration` | Channel M stale reverse listener recovery | No; verify only from this repo |
 | `/etc/logrotate.d/vps-management` | PraefectusAI | logrotate for system services | Yes |
 | `/etc/caddy/`, `/etc/nginx/` | application project (e.g. routing/proxy owner) | host reverse-proxy config | **No** (coordinate only) |
 | `/etc/ssh/sshd_config.d/51-channel-m-reverse.conf` | `router_configuration` | Deploy-user scoped `GatewayPorts clientspecified` for Channel M reverse listener | No; preserve during SSH hardening |
 | `/usr/local/sbin/channel-m-reverse-firewall.sh` | `router_configuration` | Reinstalls the docker bridge INPUT allow for Channel M | No; preserve during cleanup |
+| `/usr/local/sbin/channel-m-reverse-listener-watchdog.sh` | `router_configuration` | Removes bound-but-not-forwarding stale Channel M SSH reverse listeners | No; preserve during cleanup |
 | `/var/log/` | PraefectusAI | system + service logs | Yes (vacuum, rotate) |
 | `/var/lib/docker/` | PraefectusAI (host-side) | docker storage | Yes (`prune` with `--filter` only!) |
 | `/var/cache/apt/` | PraefectusAI | apt cache | Yes (clean) |
-| `/home/deploy/.ssh/authorized_keys` | PraefectusAI | SSH access keys | Yes |
+| `/home/deploy/.ssh/authorized_keys` | PraefectusAI / `router_configuration` scoped exception | Normal SSH access keys; Channel M `permitlisten` key entry | Yes for normal access keys; preserve scoped Channel M `permitlisten` entry |
 | `/home/deploy/.config/syncthing/` | PraefectusAI | syncthing config | Yes |
 
 ## Application paths in `/opt/`

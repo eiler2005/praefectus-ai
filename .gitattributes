@@ -1,0 +1,3 @@
+# Unix entrypoints need LF shebangs; CRLF makes /usr/bin/env look for
+# an interpreter name ending in '\r'.
+modules/port-audit/bin/port-audit text eol=lf

@@ -40,7 +40,7 @@ You wake up to a green status. Or to a Telegram message that already tells you w
 
 | You say... | The agent does... | You get... |
 |---|---|---|
-| *"Is everything OK?"* | `verify.sh` | 12-check health gate in five seconds. Structured JSON for trends; human-readable summary for you. |
+| *"Is everything OK?"* | `verify.sh` | Read-only health and host guardrail gate in five seconds. Structured JSON for trends; human-readable summary for you. |
 | *"Free me some disk."* | `10-disk-cleanup.yml --check --diff`, then apply | Dry-run preview, then safe cleanup. Saves you the typing — and protects you from `docker system prune -a` muscle memory. |
 | *"Audit the firewall and ports."* | `port-audit` + `firewall.md` review | Live `ss -tlnp` compared with your documented inventory. Anything that drifted is flagged. |
 | *"Apply the security baseline."* | `40-security.yml` | `fail2ban` + `unattended-upgrades` (`-security` only) + sshd hardening. Idempotent — run it once or run it weekly, same result. |
@@ -124,7 +124,7 @@ The actual hands-on work — what runs on your VPS in your name, with the playbo
 - **Hardens SSH and patches the OS** — `fail2ban` sshd jail (24 h ban after 3 retries), `unattended-upgrades` for `-security` only (no reboots), sshd `MaxSessions` enforcement. ([`40-security.yml`](ansible/playbooks/40-security.yml))
 - **Backs up application data** — daily encrypted snapshot to Backblaze B2 via `restic`. Operator holds the encryption password; even the agent can't read its own backups. ([`30-backup.yml`](ansible/playbooks/30-backup.yml))
 - **Watches health every 5 minutes** — disk, memory, swap, load, container restart counts. Telegram alert on the first amber. ([`20-monitoring.yml`](ansible/playbooks/20-monitoring.yml))
-- **Runs a 12-check health gate on demand** — disk, memory, swap, load, Docker daemon, container status, UFW, restart counts, app dirs, listening ports, services, key file integrity. Structured JSON for trends; markdown summary for humans. ([`99-verify.yml`](ansible/playbooks/99-verify.yml))
+- **Runs a read-only health gate on demand** — disk, memory, swap, load, Docker daemon, container status, UFW, restart counts, app dirs, host guardrail files, systemd timers, and restricted TCP listeners. Structured JSON for trends; markdown summary for humans. ([`99-verify.yml`](ansible/playbooks/99-verify.yml))
 - **Detects drift over time** — reads N recent reports, surfaces slow regressions in disk / memory / swap / restart counts. ([`health-trend`](modules/health-trends/bin/health-trend))
 - **Audits the firewall and ports** — compares live `ss -tlnp` against your documented port map; flags new, missing, or unsafe-bound listeners. ([`port-audit`](modules/port-audit/bin/port-audit))
 - **Audits Syncthing** — finds `*.sync-conflict-*` files, files >100 MB, broken peer connections; produces a markdown report. ([`50-syncthing-audit.yml`](ansible/playbooks/50-syncthing-audit.yml))

@@ -25,6 +25,9 @@ logrotate_targets:
 # is kept as the vps-hetzner-prod default.
 expected_app_dirs: []
 expected_containers: "{{ vault_expected_containers | default([]) }}"
+expected_host_files: []
+expected_systemd_timers: []
+restricted_tcp_listeners: []
 
 # Health threshold defaults (overridable from vault)
 disk_warn_pct_default: 80

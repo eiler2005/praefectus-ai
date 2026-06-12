@@ -16,8 +16,8 @@ Ports intentionally exposed to the public internet.
 |---|---|---|---|---|---|
 | 22 | TCP | sshd | system (sshd) | PraefectusAI | `nc -z <host> 22` |
 | 80 | TCP | HTTP → HTTPS redirect, ACME challenge | system (caddy / nginx) | application owner | `curl -I http://<host>/` |
-| 443 | TCP | HTTPS | system (caddy / nginx) | application owner | TLS handshake |
-| 2087 | TCP | Admin console HTTPS | system reverse proxy | application owner | TLS handshake |
+| 443 | TCP | HTTPS + host/SNI-routed Console fallback | system (caddy / nginx) | application owner / routing project | TLS handshake |
+| 2087 | TCP | Admin console dedicated HTTPS listener | system reverse proxy | application owner / routing project | TLS handshake |
 | 22000 | TCP | Syncthing sync | system (syncthing) | PraefectusAI | TCP connect |
 | 22000 | UDP | Syncthing sync (QUIC) | system (syncthing) | PraefectusAI | UDP connect |
 | 21027 | UDP | Syncthing discovery | system (syncthing) | PraefectusAI | UDP connect |
@@ -29,7 +29,7 @@ Ports that must be reachable only from a defined source network (Docker bridge, 
 | Port | Protocol | Service | Source | Owner | Note |
 |---|---|---|---|---|---|
 | 15353 | TCP+UDP | Internal DNS resolver (Unbound) | 172.22.0.0/16 (Docker bridge) | application owner | Optional; UFW rule remains for diagnostics |
-| 18057 | TCP | Channel M reverse MAX egress listener | compose Docker bridge only | router_configuration / maxtg_bridge | Internal SSH remote-forward endpoint; not public UFW/cloud-firewall exposure |
+| 18057 | TCP | Channel M reverse MAX egress listener | compose Docker bridge only | router_configuration / maxtg_bridge | Internal SSH remote-forward endpoint; guarded by firewall + stale-listener watchdog; not public UFW/cloud-firewall exposure |
 
 ## Private ports (`127.0.0.1` — internal only)
 
@@ -64,6 +64,14 @@ Replace `<app port>` rows with your own services.
 | redis (example) | application_default | 6379 | available only inside the network |
 | maxtg bridge | deploy_default | bridge container reaches host gateway on 18057 | reverse Channel M maps proxy host to the Docker bridge gateway with `extra_hosts` |
 
+## External router-owned ports (not VPS listeners)
+
+These ports belong to other network devices/projects and must not be added to the VPS expected listener set.
+
+| Port | Protocol | Service | Location | Owner | VPS rule |
+|---|---|---|---|---|---|
+| 4444 | TCP | Channel D router-native NaiveProxy lane | home router WAN -> router Caddy `forward_proxy@naive` -> router-local SOCKS | router_configuration | Do not open on VPS UFW/cloud firewall; `port-audit` should not expect it |
+
 ---
 
 ## Port range conventions
@@ -85,6 +93,8 @@ The following ports must be bound to `127.0.0.1` only, never to `0.0.0.0`:
 
 - All application API ports (any port from a container that doesn't need public exposure)
 - 8384 (Syncthing Web UI)
+- 18057 must stay on a Docker bridge address only; a public bind is an incident.
+- 4444 must not appear on the VPS at all; it is a home-router Channel D listener.
 
 If `ss -tlnp` shows `0.0.0.0` for any of these, that is an immediate incident.
 

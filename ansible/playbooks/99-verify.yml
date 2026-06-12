@@ -1,7 +1,8 @@
 ---
 # Read-only health gate. No mutations.
 # Uses the raw module (works with pipelining on this VPS).
-# Checks: disk, mem, load, docker daemon, containers, ufw, app dirs.
+# Checks: disk, mem, load, docker daemon, containers, ufw, app dirs,
+# host guardrail files, systemd timers, restricted TCP listeners.
 
 - name: "99 | Verify — read-only health checks"
   hosts: vps
@@ -131,6 +132,128 @@
       check_mode: false
       failed_when: false
 
+    - name: "verify | 11) expected host files"
+      ansible.builtin.raw: |
+        {% if (expected_host_files | default([]) | length) == 0 %}
+        echo "(none configured)"
+        {% else %}
+        {% for item in expected_host_files | default([]) %}
+        if [ -e {{ item.path | quote }} ]; then
+          echo "OK {{ item.path }} owner={{ item.owner | default('unknown') }}"
+        else
+          echo "MISSING {{ item.path }} owner={{ item.owner | default('unknown') }}"
+        fi
+        {% endfor %}
+        {% endif %}
+      register: vfy_host_files_raw
+      changed_when: false
+      check_mode: false
+      failed_when: false
+
+    - name: "verify | 12) expected systemd timers"
+      ansible.builtin.raw: |
+        {% if (expected_systemd_timers | default([]) | length) == 0 %}
+        echo "(none configured)"
+        {% else %}
+        {% for item in expected_systemd_timers | default([]) %}
+        timer={{ item.name | quote }}
+        enabled="$(systemctl is-enabled "$timer" 2>/dev/null || true)"
+        active="$(systemctl is-active "$timer" 2>/dev/null || true)"
+        if [ "$enabled" = "enabled" ] && [ "$active" = "active" ]; then
+          echo "OK $timer owner={{ item.owner | default('unknown') }} enabled active"
+        else
+          echo "FAIL $timer owner={{ item.owner | default('unknown') }} enabled=${enabled:-n/a} active=${active:-n/a}"
+        fi
+        {% endfor %}
+        {% endif %}
+      register: vfy_systemd_timers_raw
+      changed_when: false
+      check_mode: false
+      failed_when: false
+
+    - name: "verify | 13) restricted TCP listeners"
+      ansible.builtin.raw: |
+        python3 - <<'PY'
+        import ipaddress
+        import json
+        import subprocess
+
+        listeners = {{ restricted_tcp_listeners | default([]) | to_json }}
+        if not listeners:
+            print("(none configured)")
+            raise SystemExit(0)
+
+        raw = subprocess.run(
+            ["ss", "-H", "-ltn"],
+            text=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.DEVNULL,
+            check=False,
+        ).stdout
+        private_ipv4_nets = [
+            ipaddress.ip_network("10.0.0.0/8"),
+            ipaddress.ip_network("172.16.0.0/12"),
+            ipaddress.ip_network("192.168.0.0/16"),
+        ]
+        public_hosts = {"0.0.0.0", "*", "::", "[::]"}
+
+        def split_local(value):
+            if value.startswith("["):
+                host, _, port = value.rpartition("]:")
+                return host + "]", port
+            host, _, port = value.rpartition(":")
+            return host, port
+
+        def normalized(host):
+            return host.strip("[]")
+
+        def is_docker_bridge(host):
+            try:
+                ip = ipaddress.ip_address(normalized(host))
+            except ValueError:
+                return False
+            return ip.version == 4 and any(ip in net for net in private_ipv4_nets)
+
+        by_port = {}
+        for line in raw.splitlines():
+            parts = line.split()
+            if len(parts) < 4:
+                continue
+            host, port = split_local(parts[3])
+            by_port.setdefault(port, []).append(host)
+
+        for item in listeners:
+            port = str(item.get("port", ""))
+            name = item.get("name", port)
+            scope = item.get("expected_scope", "restricted")
+            owner = item.get("owner", "unknown")
+            hosts = by_port.get(port, [])
+            if not hosts:
+                print(f"MISSING {name} port={port} owner={owner}")
+                continue
+            public = [host for host in hosts if host in public_hosts]
+            if public:
+                print(f"UNSAFE {name} port={port} owner={owner} public={','.join(public)} all={','.join(hosts)}")
+                continue
+            if scope == "docker_bridge" and not any(is_docker_bridge(host) for host in hosts):
+                print(f"WRONG_SCOPE {name} port={port} owner={owner} binds={','.join(hosts)} expected=docker_bridge")
+                continue
+            print(f"OK {name} port={port} owner={owner} binds={','.join(hosts)}")
+        PY
+      register: vfy_restricted_listeners_raw
+      changed_when: false
+      check_mode: false
+      failed_when: false
+
+    - name: "verify | set host guardrail facts"
+      ansible.builtin.set_fact:
+        vfy_host_files_failed: "{{ 'MISSING ' in (vfy_host_files_raw.stdout | default('')) }}"
+        vfy_systemd_timers_failed: "{{ 'FAIL ' in (vfy_systemd_timers_raw.stdout | default('')) }}"
+        vfy_restricted_listeners_failed: >-
+          {{ 'MISSING ' in (vfy_restricted_listeners_raw.stdout | default(''))
+             or 'UNSAFE ' in (vfy_restricted_listeners_raw.stdout | default(''))
+             or 'WRONG_SCOPE ' in (vfy_restricted_listeners_raw.stdout | default('')) }}
+
     - name: "verify | display full summary"
       ansible.builtin.debug:
         msg:
@@ -151,6 +274,12 @@
           - "------------------------------------------------------------"
           - "App dirs:"
           - "{{ vfy_dirs_raw.stdout_lines | default([]) }}"
+          - "Host files:"
+          - "{{ vfy_host_files_raw.stdout_lines | default([]) }}"
+          - "Systemd timers:"
+          - "{{ vfy_systemd_timers_raw.stdout_lines | default([]) }}"
+          - "Restricted TCP listeners:"
+          - "{{ vfy_restricted_listeners_raw.stdout_lines | default([]) }}"
           - "============================================================"
 
     # ---- REPORTS (before fail tasks, so report is always written) ----
@@ -159,7 +288,10 @@
         vfy_overall_status: >-
           {{ 'fail' if (vfy_disk_pct | int >= (vault_disk_crit_pct | default(90)) | int
                         or vfy_mem_mb | int < (vault_mem_crit_mb | default(200)) | int
-                        or 'active' not in (vfy_docker_raw.stdout | default('')))
+                        or 'active' not in (vfy_docker_raw.stdout | default(''))
+                        or vfy_host_files_failed | bool
+                        or vfy_systemd_timers_failed | bool
+                        or vfy_restricted_listeners_failed | bool)
              else 'warn' if (vfy_disk_pct | int >= (vault_disk_warn_pct | default(80)) | int
                              or vfy_mem_mb | int < (vault_mem_warn_mb | default(500)) | int
                              or vfy_swap_pct | int >= 80)
@@ -177,6 +309,9 @@
             load_5min: "{{ vfy_load_raw.stdout | trim | float }}"
             swap_used_pct: "{{ vfy_swap_pct | int }}"
           running_containers: "{{ vfy_containers_raw.stdout_lines | default([]) }}"
+          host_files: "{{ vfy_host_files_raw.stdout_lines | default([]) }}"
+          systemd_timers: "{{ vfy_systemd_timers_raw.stdout_lines | default([]) }}"
+          restricted_tcp_listeners: "{{ vfy_restricted_listeners_raw.stdout_lines | default([]) }}"
 
     - name: "verify | ensure health report dir"
       ansible.builtin.file:
@@ -237,6 +372,24 @@
           ```
           {{ vfy_restarts_raw.stdout | trim | default('n/a') }}
           ```
+
+          ## Host guardrail files
+
+          ```
+          {{ vfy_host_files_raw.stdout | trim | default('n/a') }}
+          ```
+
+          ## Systemd timers
+
+          ```
+          {{ vfy_systemd_timers_raw.stdout | trim | default('n/a') }}
+          ```
+
+          ## Restricted TCP listeners
+
+          ```
+          {{ vfy_restricted_listeners_raw.stdout | trim | default('n/a') }}
+          ```
       delegate_to: localhost
       become: false
       check_mode: false
@@ -255,3 +408,18 @@
       ansible.builtin.fail:
         msg: "CRITICAL: docker daemon is not active"
       when: "'active' not in (vfy_docker_raw.stdout | default(''))"
+
+    - name: "verify | fail if expected host files are missing"
+      ansible.builtin.fail:
+        msg: "CRITICAL: expected host guardrail files missing: {{ vfy_host_files_raw.stdout_lines | select('search', '^MISSING ') | list }}"
+      when: vfy_host_files_failed | bool
+
+    - name: "verify | fail if expected systemd timers are inactive"
+      ansible.builtin.fail:
+        msg: "CRITICAL: expected systemd timers inactive: {{ vfy_systemd_timers_raw.stdout_lines | select('search', '^FAIL ') | list }}"
+      when: vfy_systemd_timers_failed | bool
+
+    - name: "verify | fail if restricted TCP listeners are unsafe"
+      ansible.builtin.fail:
+        msg: "CRITICAL: restricted TCP listener problem: {{ vfy_restricted_listeners_raw.stdout_lines | reject('search', '^OK ') | reject('equalto', '(none configured)') | list }}"
+      when: vfy_restricted_listeners_failed | bool

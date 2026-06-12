@@ -17,7 +17,7 @@ Status: active
 [ 1] 22/tcp                     ALLOW IN    <operator-home-ip>         # SSH from operator home
 [ 2] 22/tcp                     ALLOW IN    <work-ip>                  # SSH from work
 [ 3] 80/tcp                     ALLOW IN    Anywhere                   # HTTP for ACME
-[ 4] 443/tcp                    ALLOW IN    Anywhere                   # HTTPS
+[ 4] 443/tcp                    ALLOW IN    Anywhere                   # HTTPS + host/SNI Console fallback
 [ 5] 22000/tcp                  ALLOW IN    Anywhere                   # Syncthing data TCP
 [ 6] 22000/udp                  ALLOW IN    Anywhere                   # Syncthing data QUIC
 [ 7] 21027/udp                  ALLOW IN    Anywhere                   # Syncthing discovery
@@ -29,7 +29,7 @@ Status: active
 [13] 22/tcp                     ALLOW IN    <bastion-ip>               # bastion SSH
 [14] 15353/tcp                  ALLOW IN    172.22.0.0/16              # internal resolver from Docker bridge
 [15] 15353/udp                  ALLOW IN    172.22.0.0/16
-[16] 2087/tcp                   ALLOW IN    Anywhere                   # admin console HTTPS (Caddy front)
+[16] 2087/tcp                   ALLOW IN    Anywhere                   # dedicated admin console HTTPS
 [17] 443/tcp                    ALLOW OUT   Anywhere                   (out)
 [18] 53                         ALLOW OUT   Anywhere                   (out)
 [19] 80/tcp (v6)                ALLOW IN    Anywhere (v6)              # HTTP for ACME
@@ -39,7 +39,7 @@ Status: active
 [23] 21027/udp (v6)             ALLOW IN    Anywhere (v6)              # Syncthing discovery
 [24] 53/tcp (v6)                DENY IN     Anywhere (v6)
 [25] 53/udp (v6)                DENY IN     Anywhere (v6)
-[26] 2087/tcp (v6)              ALLOW IN    Anywhere (v6)              # admin console HTTPS
+[26] 2087/tcp (v6)              ALLOW IN    Anywhere (v6)              # dedicated admin console HTTPS
 [27] 443/tcp                    ALLOW OUT   Anywhere (v6)              (out)
 [28] 53 (v6)                    ALLOW OUT   Anywhere (v6)              (out)
 ```
@@ -52,8 +52,8 @@ Status: active
 |---|---|---|---|
 | 22 | TCP | SSH from allowlisted IPs (multiple rules) | PraefectusAI |
 | 80 | TCP | HTTP → HTTPS redirect, ACME challenge | application owner (reverse proxy) |
-| 443 | TCP | HTTPS + multiplexed protocols on 443 | application owner |
-| 2087 | TCP | Admin console HTTPS (front-ended by reverse proxy) | application owner |
+| 443 | TCP | HTTPS + multiplexed protocols on 443; GhostRoute Console can also be served by host/SNI on standard HTTPS | application owner / routing project |
+| 2087 | TCP | Dedicated admin console HTTPS listener (configured public Console path) | application owner / routing project |
 | 21027 | UDP | Syncthing discovery protocol | PraefectusAI |
 | 22000 | TCP+UDP | Syncthing peer sync (control machine ↔ VPS) | PraefectusAI |
 | 53 | TCP+UDP | **DENY IN** — VPS must never serve as a public DNS resolver | PraefectusAI |
@@ -72,9 +72,13 @@ for the compose Docker bridge subnet to reach the Docker bridge gateway on
 - `/usr/local/sbin/channel-m-reverse-firewall.sh`
 - `channel-m-reverse-firewall.service`
 - `channel-m-reverse-firewall.timer`
+- `/usr/local/sbin/channel-m-reverse-listener-watchdog.sh`
+- `channel-m-reverse-listener-watchdog.service`
+- `channel-m-reverse-listener-watchdog.timer`
 
 It must stay bridge-scoped. Do not add `18057/tcp` to public UFW rules or cloud
-firewall rules.
+firewall rules. The listener watchdog removes stale SSH reverse listeners that
+remain bound but no longer forward back to the home router.
 
 ---
 
@@ -84,6 +88,7 @@ firewall rules.
 |---|---|---|
 | 8384 | Syncthing Web UI | `127.0.0.1` only; access via SSH tunnel |
 | 9100 | `node_exporter` (future) | `127.0.0.1` only |
+| 4444 | GhostRoute Channel D | Home-router WAN listener only; never a VPS UFW/cloud-firewall allow |
 | Application APIs | each application's HTTP/RPC | `127.0.0.1` only; routed via reverse proxy if exposed |
 
 ---

@@ -21,6 +21,38 @@ all:
                 - /opt/openclaw
                 - /opt/lightrag
                 - /opt/fluentloop-bot
+              expected_host_files:
+                - path: /etc/ssh/sshd_config.d/51-channel-m-reverse.conf
+                  owner: router_configuration
+                  purpose: Channel M deploy-user scoped GatewayPorts policy
+                - path: /usr/local/sbin/channel-m-reverse-firewall.sh
+                  owner: router_configuration
+                  purpose: Channel M docker bridge firewall persistence
+                - path: /usr/local/sbin/channel-m-reverse-listener-watchdog.sh
+                  owner: router_configuration
+                  purpose: Channel M stale reverse listener recovery
+                - path: /etc/systemd/system/channel-m-reverse-firewall.service
+                  owner: router_configuration
+                  purpose: Channel M docker bridge firewall systemd unit
+                - path: /etc/systemd/system/channel-m-reverse-firewall.timer
+                  owner: router_configuration
+                  purpose: Channel M docker bridge firewall timer
+                - path: /etc/systemd/system/channel-m-reverse-listener-watchdog.service
+                  owner: router_configuration
+                  purpose: Channel M stale listener watchdog unit
+                - path: /etc/systemd/system/channel-m-reverse-listener-watchdog.timer
+                  owner: router_configuration
+                  purpose: Channel M stale listener watchdog timer
+              expected_systemd_timers:
+                - name: channel-m-reverse-firewall.timer
+                  owner: router_configuration
+                - name: channel-m-reverse-listener-watchdog.timer
+                  owner: router_configuration
+              restricted_tcp_listeners:
+                - port: 18057
+                  name: channel-m-reverse
+                  owner: router_configuration / maxtg_bridge
+                  expected_scope: docker_bridge
             vps-hostkey-hermes:
               vps_display_name: pulsartrlab-hermes-hostkey
               expected_app_dirs:

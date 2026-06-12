@@ -10,7 +10,7 @@ Inventory of every Docker container running on the VPS. Update when adding or re
 
 | Container | Criticality | Resource limit | Notes |
 |---|---|---|---|
-| `deploy-bridge-1` | CRITICAL | 512m | `maxtg_bridge` production bridge; MAX egress uses reverse Channel M through VPS docker bridge listener |
+| `deploy-bridge-1` | CRITICAL | 512m | `maxtg_bridge` production bridge; MAX egress uses reverse Channel M through VPS docker bridge listener guarded by router_configuration firewall/watchdog units |
 | `openclaw-openclaw-gateway-1` | CRITICAL | 1224m / 0.90 CPU / 256 pids | OpenClaw gateway; limits from `70-docker-limits-critical.yml`, aligned with `openclaw_firststeps` resource guardrails |
 | `omniroute` | CRITICAL | 512m / 0.25 CPU / 128 pids | LLM route proxy; limits from `70-docker-limits-critical.yml` |
 | `lightrag-lightrag-1` | CRITICAL | 1536m / 0.45 CPU / 128 pids | Knowledge graph service; 1.5GB is intentional because lower caps caused cold-start OOM on the current graph |
@@ -61,9 +61,9 @@ For every container, document:
 | Volumes | `/opt/maxtg-bridge/data`, `config.yaml`, `config.local.yaml` |
 | Healthcheck | Docker healthcheck from bridge runtime heartbeat |
 | `mem_limit` | 512m from application compose |
-| Role | MAX -> Telegram bridge; Telegram direct from VPS; MAX API/CDN through reverse Channel M |
+| Role | MAX -> Telegram bridge; Telegram direct from VPS; MAX API/CDN through reverse Channel M; stale VPS listener recovery is owned by `router_configuration` |
 | Data | SQLite DB, MAX session and runtime health files under `/opt/maxtg-bridge/data` |
-| Deploy | `maxtg_bridge` repo; `infra/ansible/deploy.yml` and `infra/ansible/channel-m-reverse.yml` |
+| Deploy | `maxtg_bridge` repo for the app; `router_configuration` owns the Channel M reverse VPS listener/firewall/watchdog path |
 ### <container-name>
 
 | Parameter | Value |
