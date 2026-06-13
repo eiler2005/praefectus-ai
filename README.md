@@ -8,6 +8,11 @@
 
 **Your AI sysadmin. Under contract.**
 
+For the current channel-supporting VPS runtime map, including GhostRoute
+Channel M/D guardrails, public/restricted listener schemes, software versions
+and read-only test diagrams, see
+[`docs/vps-runtime-map.md`](docs/vps-runtime-map.md).
+
 PraefectusAI is a digital infrastructure administrator powered by an LLM agent. It operates your Linux VPS under an explicit mandate — narrow scope, deterministic actions, faithful reports back. The repo is its employment contract: the rules it follows, the skills it can use, the boundaries it must not cross, and the journal of everything it has done in your name.
 
 It works with Claude Code, Codex, Cursor, and any LLM agent that follows instructions, through the [`AGENTS.md`](AGENTS.md) contract pattern. Under the hood, the agent's actions are deterministic Ansible playbooks; its skills are CLI tools; its guardrails are Vault + scoped permissions; its memory is structured reports. Bring your own VPS — single host or small fleet — the patterns scale.
