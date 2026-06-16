@@ -16,7 +16,7 @@ Ports intentionally exposed to the public internet.
 |---|---|---|---|---|---|
 | 22 | TCP | sshd | system (sshd) | PraefectusAI | `nc -z <host> 22` |
 | 80 | TCP | HTTP → HTTPS redirect, ACME challenge | system (caddy / nginx) | application owner | `curl -I http://<host>/` |
-| 443 | TCP | HTTPS + host/SNI-routed Console fallback | system (caddy / nginx) | application owner / routing project | TLS handshake |
+| 443 | TCP | HTTPS + SNI-routed routing surfaces; Hermes owned egress uses Caddy layer4 | system or container Caddy | application owner / routing project | TLS handshake |
 | 2087 | TCP | Admin console dedicated HTTPS listener | system reverse proxy | application owner / routing project | TLS handshake |
 | 22000 | TCP | Syncthing sync | system (syncthing) | PraefectusAI | TCP connect |
 | 22000 | UDP | Syncthing sync (QUIC) | system (syncthing) | PraefectusAI | UDP connect |

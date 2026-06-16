@@ -40,6 +40,7 @@ Each application running on the VPS is an "owner" with its own deploy pipeline. 
 | `/opt/<app-4>/` | `<app-4-repo>` | router service | application's own deploy script | `mem_limit` |
 | `/opt/moex-futoi/` | `moex_futoi` | MOEX/FUTOI trading signal bot, market data, signal registry, reports, compose deploy files | application's own deploy script | host-level monitoring only; do not edit app compose/env directly |
 | `/opt/<routing-app>/` | `<routing-repo>` | stealth-routing config | routing project ansible | **No** |
+| `/opt/stealth/` on `vps-hostkey-hermes` | `router_configuration` | GhostRoute owned managed egress: Caddy layer4 + Xray/Reality + restricted resolver | `router_configuration` Ansible | verify only; do not edit compose/config from this repo |
 | `/opt/<obsidian-vault>/` | PraefectusAI (Syncthing host) | bidirectional sync with control machine | Syncthing | Yes |
 
 ## What "owner" means

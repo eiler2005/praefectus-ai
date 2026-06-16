@@ -56,8 +56,15 @@ all:
             vps-hostkey-hermes:
               vps_display_name: pulsartrlab-hermes-hostkey
               expected_app_dirs:
+                - /opt/stealth
                 - /opt/moex-futoi
               expected_containers:
+                - name: caddy
+                  owner: router_configuration
+                  healthcheck: docker
+                - name: xray
+                  owner: router_configuration
+                  healthcheck: docker
                 - name: moex-futoi-bot-1
                   owner: moex_futoi
                   healthcheck: docker
