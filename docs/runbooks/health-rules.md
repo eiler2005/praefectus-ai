@@ -67,6 +67,9 @@ Formal criteria for VPS state. Used by `99-verify.yml`, `health-trend`, and the 
 **Actions:**
 - Container not running → CRIT + Telegram with name + last 20 lines of `docker logs`.
 - RestartCount ≥ 3 → WARN in log; check `docker logs <name>`.
+- If `openclaw-openclaw-gateway-1` is stopped after exhausting `restart=on-failure:5`, treat that as
+  host protection rather than an ordinary down container. Check OOM/restart evidence, then apply
+  `70-docker-limits-critical.yml` and recreate only the Gateway after the resource cause is understood.
 
 ### UFW
 
@@ -82,6 +85,8 @@ Formal criteria for VPS state. Used by `99-verify.yml`, `health-trend`, and the 
 
 **Actions:**
 - CRIT → Telegram alert with process name; check limits in `docs/containers.md`.
+- Repeated OpenClaw Gateway OOMs must not be masked by switching it back to `restart=unless-stopped`;
+  keep the bounded restart policy so the VPS remains available for `maxtg_bridge` and SSH.
 
 ---
 

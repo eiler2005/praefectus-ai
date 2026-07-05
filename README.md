@@ -125,7 +125,7 @@ The actual hands-on work — what runs on your VPS in your name, with the playbo
 
 - **Cleans the disk** — `apt clean` + `autoremove`, `journalctl` vacuum (14 d / 500 MB cap), `docker container/image/builder prune` with `--filter "until=24h"`. Volumes are never touched. ([`10-disk-cleanup.yml`](ansible/playbooks/10-disk-cleanup.yml))
 - **Schedules a weekly cleanup** — same safe operations as above, run autonomously every Sunday at 03:00 UTC via systemd timer. Output captured to `/var/log/vps-weekly-cleanup.log`. ([`11-schedule-cleanup.yml`](ansible/playbooks/11-schedule-cleanup.yml))
-- **Caps container resources** — applies memory, CPU, and PID guardrails per container via `docker-compose.override.local.yml`, with `docker update` for instant effect on critical services (no restart needed). Never edits the application's own compose file. ([`60-docker-limits.yml`](ansible/playbooks/60-docker-limits.yml), [`70-docker-limits-critical.yml`](ansible/playbooks/70-docker-limits-critical.yml))
+- **Caps container resources** — applies memory, CPU, PID, restart, and log guardrails per container via `docker-compose.override.local.yml`, with `docker update` for instant effect where Docker supports it. Never edits the application's own compose file. ([`60-docker-limits.yml`](ansible/playbooks/60-docker-limits.yml), [`70-docker-limits-critical.yml`](ansible/playbooks/70-docker-limits-critical.yml))
 - **Hardens SSH and patches the OS** — `fail2ban` sshd jail (24 h ban after 3 retries), `unattended-upgrades` for `-security` only (no reboots), sshd `MaxSessions` enforcement. ([`40-security.yml`](ansible/playbooks/40-security.yml))
 - **Backs up application data** — daily encrypted snapshot to Backblaze B2 via `restic`. Operator holds the encryption password; even the agent can't read its own backups. ([`30-backup.yml`](ansible/playbooks/30-backup.yml))
 - **Watches health every 5 minutes** — disk, memory, swap, load, container restart counts. Telegram alert on the first amber. ([`20-monitoring.yml`](ansible/playbooks/20-monitoring.yml))
@@ -277,7 +277,7 @@ Secrets live encrypted in `ansible/group_vars/all/vault.yml`; the vault password
 | 40 | `40-security.yml` | `fail2ban` (sshd jail), `unattended-upgrades` (`-security` only), sshd `MaxSessions` enforcement, UFW audit. | yes |
 | 50 | `50-syncthing-audit.yml` | Reports `*.sync-conflict-*`, large files, peer status. Writes `reports/syncthing-audit-*.md`. | read + report |
 | 60 | `60-docker-limits.yml` | `mem_limit` overrides for less-critical containers. | yes (no auto-restart) |
-| 70 | `70-docker-limits-critical.yml` | CPU / memory / PID guardrails for critical services with immediate `docker update`. | yes |
+| 70 | `70-docker-limits-critical.yml` | CPU / memory / PID / restart guardrails for critical services with immediate `docker update`; log caps persist for the next compose recreate. | yes |
 | 99 | `99-verify.yml` | Read-only health gate. 12 checks. Emits `reports/health/*.json` + `reports/verify-*.md`. | **no** |
 
 Before any mutating playbook, run `--check --diff` and review the output. See [`AGENTS.md`](AGENTS.md) safety rules.

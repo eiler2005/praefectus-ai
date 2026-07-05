@@ -3,7 +3,7 @@
 #
 # Uses TWO mechanisms:
 #   1. docker-compose.override.local.yml — persistent (active on next compose up)
-#   2. docker update --memory/--cpus/--pids-limit — immediate (no restart needed)
+#   2. docker update --memory/--cpus/--pids-limit/--restart — immediate where Docker supports it
 #
 # Out of scope (other owners' zones):
 #   - routing-side containers managed by the routing project
@@ -23,7 +23,8 @@
   vars:
     mem_openclaw_gateway: "{{ vault_mem_openclaw_gateway | default('1224m') }}"
     mem_omniroute:        "{{ vault_mem_omniroute        | default('512m') }}"
-    mem_lightrag:         "{{ vault_mem_lightrag         | default('1536m') }}"
+    mem_lightrag:         "{{ vault_mem_lightrag         | default('2304m') }}"
+    memswap_lightrag:     "{{ vault_memswap_lightrag     | default('2816m') }}"
     mem_redis:            "{{ vault_mem_redis            | default('256m') }}"
     cpu_openclaw_gateway: "{{ vault_cpu_openclaw_gateway | default('0.90') }}"
     cpu_omniroute:        "{{ vault_cpu_omniroute        | default('0.25') }}"
@@ -32,6 +33,10 @@
     pids_openclaw_gateway: "{{ vault_pids_openclaw_gateway | default(256) }}"
     pids_omniroute:        "{{ vault_pids_omniroute        | default(128) }}"
     pids_lightrag:         "{{ vault_pids_lightrag         | default(128) }}"
+    restart_openclaw_gateway: "{{ vault_restart_openclaw_gateway | default('on-failure:5') }}"
+    log_driver_critical:      "{{ vault_log_driver_critical      | default('json-file') }}"
+    log_max_size_critical:    "{{ vault_log_max_size_critical    | default('10m') }}"
+    log_max_file_critical:    "{{ vault_log_max_file_critical    | default('3') }}"
 
   tasks:
     # ---- AUDIT ----
@@ -77,11 +82,22 @@
             mem_limit: {{ mem_openclaw_gateway }}
             memswap_limit: {{ mem_openclaw_gateway }}
             pids_limit: {{ pids_openclaw_gateway }}
+            restart: "{{ restart_openclaw_gateway }}"
+            logging:
+              driver: {{ log_driver_critical }}
+              options:
+                max-size: "{{ log_max_size_critical }}"
+                max-file: "{{ log_max_file_critical }}"
           omniroute:
             cpus: "{{ cpu_omniroute }}"
             mem_limit: {{ mem_omniroute }}
             memswap_limit: {{ mem_omniroute }}
             pids_limit: {{ pids_omniroute }}
+            logging:
+              driver: {{ log_driver_critical }}
+              options:
+                max-size: "{{ log_max_size_critical }}"
+                max-file: "{{ log_max_file_critical }}"
         EOF
         echo CHANGED
       register: r_openclaw
@@ -99,8 +115,13 @@
           lightrag:
             cpus: "{{ cpu_lightrag }}"
             mem_limit: {{ mem_lightrag }}
-            memswap_limit: {{ mem_lightrag }}
+            memswap_limit: {{ memswap_lightrag }}
             pids_limit: {{ pids_lightrag }}
+            logging:
+              driver: {{ log_driver_critical }}
+              options:
+                max-size: "{{ log_max_size_critical }}"
+                max-file: "{{ log_max_file_critical }}"
         EOF
         echo CHANGED
       register: r_lightrag
@@ -133,6 +154,7 @@
             --memory={{ mem_openclaw_gateway }} \
             --memory-swap={{ mem_openclaw_gateway }} \
             --pids-limit={{ pids_openclaw_gateway }} \
+            --restart={{ restart_openclaw_gateway }} \
             openclaw-openclaw-gateway-1 && echo "gateway: ok" || echo "gateway: FAILED"
         else
           echo "gateway: skipped (container absent)"
@@ -151,7 +173,7 @@
           sudo docker update \
             --cpus={{ cpu_lightrag }} \
             --memory={{ mem_lightrag }} \
-            --memory-swap={{ mem_lightrag }} \
+            --memory-swap={{ memswap_lightrag }} \
             --pids-limit={{ pids_lightrag }} \
             lightrag-lightrag-1 && echo "lightrag: ok" || echo "lightrag: FAILED"
         else
@@ -177,7 +199,7 @@
       ansible.builtin.raw: !unsafe |
         for c in openclaw-openclaw-gateway-1 omniroute lightrag-lightrag-1 integration-bus-redis; do
           sudo docker inspect "$c" \
-            --format "$c NanoCpus={{.HostConfig.NanoCpus}} Memory={{.HostConfig.Memory}} MemorySwap={{.HostConfig.MemorySwap}} PidsLimit={{.HostConfig.PidsLimit}}" \
+            --format "$c NanoCpus={{.HostConfig.NanoCpus}} Memory={{.HostConfig.Memory}} MemorySwap={{.HostConfig.MemorySwap}} PidsLimit={{.HostConfig.PidsLimit}} Restart={{.HostConfig.RestartPolicy.Name}}:{{.HostConfig.RestartPolicy.MaximumRetryCount}} Log={{.HostConfig.LogConfig.Type}} LogOpts={{json .HostConfig.LogConfig.Config}}" \
             2>/dev/null || true
         done
       register: r_verify
@@ -205,13 +227,13 @@
           - "================================================="
           - "DOCKER LIMITS CRITICAL SUMMARY"
           - "================================================="
-          - "openclaw-gateway:   {{ cpu_openclaw_gateway }} CPU / {{ mem_openclaw_gateway }} / pids {{ pids_openclaw_gateway }}  (override: {{ r_openclaw.changed | default(false) }})"
+          - "openclaw-gateway:   {{ cpu_openclaw_gateway }} CPU / {{ mem_openclaw_gateway }} / pids {{ pids_openclaw_gateway }} / restart {{ restart_openclaw_gateway }} / logs {{ log_max_size_critical }} x{{ log_max_file_critical }}  (override: {{ r_openclaw.changed | default(false) }})"
           - "omniroute:          {{ cpu_omniroute }} CPU / {{ mem_omniroute }} / pids {{ pids_omniroute }}   (override: {{ r_openclaw.changed | default(false) }})"
-          - "lightrag:           {{ cpu_lightrag }} CPU / {{ mem_lightrag }} / pids {{ pids_lightrag }}   (override: {{ r_lightrag.changed | default(false) }})"
+          - "lightrag:           {{ cpu_lightrag }} CPU / {{ mem_lightrag }} / {{ memswap_lightrag }} swap / pids {{ pids_lightrag }}   (override: {{ r_lightrag.changed | default(false) }})"
           - "redis:              {{ mem_redis }}   (override: {{ r_redis.changed | default(false) }})"
           - "================================================="
-          - "Limits applied IMMEDIATELY via docker update (no restart)."
-          - "Override files written for persistence on the next compose up."
+          - "Cgroup and Gateway restart limits applied IMMEDIATELY via docker update where supported."
+          - "Override files written for persistence on the next compose up; logging caps take effect after compose recreate."
           - "================================================="
           - "NOT touched (other-owner zones):"
           - "  routing-side containers (owned by routing project)"
