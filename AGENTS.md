@@ -188,3 +188,10 @@ Before any non-trivial change, read the relevant document:
 - [`docs/runbooks/disk-full.md`](docs/runbooks/disk-full.md) — what to do when disk fills
 - [`SECURITY.md`](SECURITY.md) — threat model, recovery boundaries
 - [`README.md`](README.md) — high-level overview, quick start
+
+<!-- lean-ctx -->
+## lean-ctx
+
+Prefer lean-ctx MCP tools over native equivalents for token savings.
+Full rules: @LEAN-CTX.md
+<!-- /lean-ctx -->
