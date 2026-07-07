@@ -36,3 +36,9 @@ mem_warn_mb_default: 500
 mem_crit_mb_default: 200
 loadavg_warn: 2.0
 loadavg_crit: 4.0
+swap_warn_pct_default: 60
+swap_crit_pct_default: 80
+container_mem_warn_pct_default: 80
+container_mem_crit_pct_default: 95
+oom_lookback_minutes_default: 10
+high_risk_restart_warn_default: 1

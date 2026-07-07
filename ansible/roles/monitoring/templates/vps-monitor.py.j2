@@ -17,12 +17,22 @@ MEM_WARN_MB   = {{ vault_mem_warn_mb | default(500) }}
 MEM_CRIT_MB   = {{ vault_mem_crit_mb | default(200) }}
 LOAD_WARN     = {{ loadavg_warn | default(2.0) }}
 LOAD_CRIT     = {{ loadavg_crit | default(4.0) }}
-SWAP_WARN_PCT = 80
+SWAP_WARN_PCT = {{ vault_swap_warn_pct | default(60) }}
+SWAP_CRIT_PCT = {{ vault_swap_crit_pct | default(80) }}
+CONTAINER_MEM_WARN_PCT = {{ vault_container_mem_warn_pct | default(80) }}
+CONTAINER_MEM_CRIT_PCT = {{ vault_container_mem_crit_pct | default(95) }}
+OOM_LOOKBACK_MINUTES = {{ vault_oom_lookback_minutes | default(10) }}
+HIGH_RISK_RESTART_WARN = {{ vault_high_risk_restart_warn | default(1) }}
 
 {% set monitor_expected_containers = monitoring_expected_containers | default(expected_containers | default([])) %}
 EXPECTED_CONTAINERS = [
 {% for c in monitor_expected_containers %}
     "{{ c.name if c is mapping else c }}",
+{% endfor %}
+]
+HIGH_RISK_CONTAINERS = [
+{% for c in vault_high_risk_containers | default(['openclaw-openclaw-gateway-1']) %}
+    "{{ c }}",
 {% endfor %}
 ]
 
@@ -33,7 +43,7 @@ HEARTBEAT_HOUR_UTC = 6  # 06:00 UTC = 09:00 MSK
 
 # ---- Helpers ----
 def log(msg):
-    ts = datetime.datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S")
+    ts = datetime.datetime.now(datetime.timezone.utc).strftime("%Y-%m-%d %H:%M:%S")
     line = f"[{ts}] {msg}"
     print(line)
     try:
@@ -157,10 +167,32 @@ for c in data:
             except ValueError:
                 pass
 
+    # Docker memory pressure
+    stats_raw = shell("docker stats --no-stream --format '{{ '{{' }}.Name{{ '}}' }} {{ '{{' }}.MemPerc{{ '}}' }}' 2>/dev/null")
+    metrics["container_mem_pct"] = {}
+    for line in stats_raw.splitlines():
+        parts = line.split()
+        if len(parts) < 2:
+            continue
+        name = parts[0]
+        pct_raw = parts[1].rstrip("%")
+        try:
+            metrics["container_mem_pct"][name] = float(pct_raw)
+        except ValueError:
+            pass
+
+    # Recent kernel/cgroup OOM evidence
+    oom_raw = shell(
+        "journalctl -k --since '%d minutes ago' --no-pager 2>/dev/null | "
+        "grep -Ei 'oom-kill|Memory cgroup out of memory|Killed process' | tail -20"
+        % OOM_LOOKBACK_MINUTES
+    )
+    metrics["recent_oom_lines"] = [line for line in oom_raw.splitlines() if line]
+
     return metrics
 
 # ---- Health evaluation ----
-def evaluate(metrics):
+def evaluate(metrics, state):
     issues = []  # (level, key, text)
 
     d = metrics["disk_pct"]
@@ -176,8 +208,10 @@ def evaluate(metrics):
         issues.append(("warn", "mem", f"RAM available {m}M (warn<{MEM_WARN_MB}M)"))
 
     s = metrics["swap_pct"]
-    if s >= SWAP_WARN_PCT:
-        issues.append(("warn", "swap", f"Swap {s}% used"))
+    if s >= SWAP_CRIT_PCT:
+        issues.append(("crit", "swap", f"Swap {s}% used (crit>={SWAP_CRIT_PCT}%)"))
+    elif s >= SWAP_WARN_PCT:
+        issues.append(("warn", "swap", f"Swap {s}% used (warn>={SWAP_WARN_PCT}%)"))
 
     l = metrics["load_5min"]
     if l >= LOAD_CRIT:
@@ -194,16 +228,30 @@ def evaluate(metrics):
             issues.append(("crit", f"container:{expected}", f"Container {expected} NOT running"))
 
     for name, cnt in metrics.get("restart_counts", {}).items():
+        prev = int(state.get(f"restart_count:{name}", 0))
+        if name in HIGH_RISK_CONTAINERS and cnt >= HIGH_RISK_RESTART_WARN and cnt > prev:
+            issues.append(("warn", f"restarts:{name}:increase", f"{name} RestartCount increased {prev}->{cnt}"))
         if cnt >= 10:
             issues.append(("crit", f"restarts:{name}", f"{name} RestartCount={cnt}"))
         elif cnt >= 3:
             issues.append(("warn", f"restarts:{name}", f"{name} RestartCount={cnt}"))
 
+    for name, pct in metrics.get("container_mem_pct", {}).items():
+        if pct >= CONTAINER_MEM_CRIT_PCT:
+            issues.append(("crit", f"container_mem:{name}", f"{name} memory {pct:.1f}% of Docker limit"))
+        elif pct >= CONTAINER_MEM_WARN_PCT:
+            issues.append(("warn", f"container_mem:{name}", f"{name} memory {pct:.1f}% of Docker limit"))
+
+    oom_lines = metrics.get("recent_oom_lines", [])
+    if oom_lines:
+        sample = oom_lines[-1][-220:]
+        issues.append(("crit", "oom_recent", f"Recent kernel/cgroup OOM in last {OOM_LOOKBACK_MINUTES}m: {sample}"))
+
     return issues
 
 # ---- Heartbeat ----
 def maybe_send_heartbeat(metrics, state):
-    now = datetime.datetime.utcnow()
+    now = datetime.datetime.now(datetime.timezone.utc)
     today_key = f"heartbeat:{now.strftime('%Y-%m-%d')}"
     if now.hour != HEARTBEAT_HOUR_UTC:
         return
@@ -215,6 +263,7 @@ def maybe_send_heartbeat(metrics, state):
         f"✅ <b>{HOST_NAME} alive</b>\n"
         f"disk: {metrics['disk_pct']}%  "
         f"mem: {metrics['mem_avail_mb']}M avail  "
+        f"swap: {metrics['swap_pct']}%  "
         f"load: {metrics['load_5min']:.2f}\n"
         f"containers: {running_cnt}/{expected_cnt} running"
     )
@@ -239,9 +288,8 @@ def run_once(test_alert=False):
         f"docker={'active' if metrics['docker_active'] else 'INACTIVE'}  "
         f"containers={len(metrics['running_containers'])}/{len(EXPECTED_CONTAINERS)}")
 
-    issues = evaluate(metrics)
-
     state = load_state()
+    issues = evaluate(metrics, state)
     exit_code = 0
 
     if issues:
@@ -257,6 +305,8 @@ def run_once(test_alert=False):
         log("All checks OK")
 
     maybe_send_heartbeat(metrics, state)
+    for name, cnt in metrics.get("restart_counts", {}).items():
+        state[f"restart_count:{name}"] = cnt
     save_state(state)
     log("=== Health check END ===")
     return exit_code

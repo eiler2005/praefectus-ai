@@ -52,6 +52,37 @@ This split lets you:
 - Does not manage application secrets (TG bot tokens, OpenAI keys, etc.) — those live in the application's own `.env.secrets` or vault.
 - Does not own application-level health (business-logic errors). It only checks that the container is running and the port answers.
 
+## Monitoring architecture
+
+`20-monitoring.yml` installs two host-owned systemd timer loops under
+`/opt/vps-monitor/`:
+
+| Timer | Frequency | Scope | Failure model |
+|---|---|---|---|
+| `vps-monitor.timer` | 5 min | Local host resources and expected containers | The host is reachable, but disk, RAM, swap, Docker, container state, restarts, or recent OOM events are suspicious. |
+| `vps-external-watchdog.timer` | 1 min | Peer VPS reachability from another managed VPS | The checked host may be powered off, hung, firewalled, or unreachable before its own local monitor can report. |
+
+The local monitor is the early-warning layer. It evaluates disk pressure,
+available RAM, swap usage, Docker daemon state, expected containers, high-risk
+container restart increases, Docker memory pressure, and recent kernel/cgroup
+OOM events. This is intentionally host-level: it can warn that
+`openclaw-openclaw-gateway-1` is pushing the VPS toward OOM without claiming
+ownership of OpenClaw application behavior.
+
+The external watchdog is the outside-view layer. Each managed VPS probes the
+other managed VPS over TCP/443 by default. SSH and ICMP are not assumed to be
+usable between providers or firewall profiles, so the probe checks the stable
+public HTTPS listener instead. The probe mode and port are vault-driven
+(`vault_external_watchdog_probe_mode`, `vault_external_watchdog_probe_port`) so
+the operator can change the reachability contract without editing templates.
+
+Telegram alert delivery is also vault-driven. If `vault_tg_infra_bot_token` or
+`vault_tg_infra_chat_id` is missing, the monitors still log locally but report
+`TELEGRAM: not configured`; this is a deliberate degraded mode, not a deploy
+failure. `ansible/inventory/production.yml` lists both monitoring timers in
+`expected_timers`, and `99-verify.yml` treats missing or inactive timers as a
+host health failure.
+
 ## Cross-project coordination
 
 Every other project that ships code into `/opt/<app>/` is an "application owner" in this model. Coordination flows through three artefacts:

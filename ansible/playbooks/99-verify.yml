@@ -68,6 +68,11 @@
         msg: "WARN memory {{ vfy_mem_mb }}M available < {{ vault_mem_warn_mb | default(500) }}M"
       when: vfy_mem_mb | int < (vault_mem_warn_mb | default(500)) | int
 
+    - name: "verify | swap warn?"
+      ansible.builtin.debug:
+        msg: "WARN swap {{ vfy_swap_pct }}% >= {{ vault_swap_warn_pct | default(60) }}%"
+      when: vfy_swap_pct | int >= (vault_swap_warn_pct | default(60)) | int
+
     - name: "verify | 4) load avg 5min"
       ansible.builtin.raw: "awk '{print $2}' /proc/loadavg"
       register: vfy_load_raw
@@ -263,6 +268,7 @@
           - "SSH:         OK"
           - "Disk /:      {{ vfy_disk_pct }}% | WARN >= {{ vault_disk_warn_pct | default(80) }}% CRIT >= {{ vault_disk_crit_pct | default(90) }}%"
           - "Memory:      {{ vfy_mem_mb }}M avail | WARN < {{ vault_mem_warn_mb | default(500) }}M"
+          - "Swap:        {{ vfy_swap_pct }}% used | WARN >= {{ vault_swap_warn_pct | default(60) }}% CRIT >= {{ vault_swap_crit_pct | default(80) }}%"
           - "Load 5min:   {{ vfy_load_raw.stdout | trim }}"
           - "Docker:      {{ vfy_docker_raw.stdout | trim }}"
           - "UFW:         {{ vfy_ufw_raw.stdout | trim | default('n/a') }}"
@@ -288,13 +294,14 @@
         vfy_overall_status: >-
           {{ 'fail' if (vfy_disk_pct | int >= (vault_disk_crit_pct | default(90)) | int
                         or vfy_mem_mb | int < (vault_mem_crit_mb | default(200)) | int
+                        or vfy_swap_pct | int >= (vault_swap_crit_pct | default(80)) | int
                         or 'active' not in (vfy_docker_raw.stdout | default(''))
                         or vfy_host_files_failed | bool
                         or vfy_systemd_timers_failed | bool
                         or vfy_restricted_listeners_failed | bool)
              else 'warn' if (vfy_disk_pct | int >= (vault_disk_warn_pct | default(80)) | int
                              or vfy_mem_mb | int < (vault_mem_warn_mb | default(500)) | int
-                             or vfy_swap_pct | int >= 80)
+                             or vfy_swap_pct | int >= (vault_swap_warn_pct | default(60)) | int)
              else 'ok' }}
 
     - name: "verify | build health data dict"
@@ -346,7 +353,7 @@
           |---|---|---|
           | Disk / | {{ vfy_disk_pct }}% used | {{ 'CRIT' if vfy_disk_pct | int >= (vault_disk_crit_pct | default(90)) | int else 'WARN' if vfy_disk_pct | int >= (vault_disk_warn_pct | default(80)) | int else 'OK' }} |
           | Memory | {{ vfy_mem_mb }}M available | {{ 'CRIT' if vfy_mem_mb | int < (vault_mem_crit_mb | default(200)) | int else 'WARN' if vfy_mem_mb | int < (vault_mem_warn_mb | default(500)) | int else 'OK' }} |
-          | Swap | {{ vfy_swap_pct }}% used | {{ 'WARN' if vfy_swap_pct | int >= 80 else 'OK' }} |
+          | Swap | {{ vfy_swap_pct }}% used | {{ 'CRIT' if vfy_swap_pct | int >= (vault_swap_crit_pct | default(80)) | int else 'WARN' if vfy_swap_pct | int >= (vault_swap_warn_pct | default(60)) | int else 'OK' }} |
           | Load 5min | {{ vfy_load_raw.stdout | trim }} | {{ 'CRIT' if vfy_load_raw.stdout | trim | float >= 4.0 else 'WARN' if vfy_load_raw.stdout | trim | float >= 2.0 else 'OK' }} |
           | Docker | {{ vfy_docker_raw.stdout | trim }} | {{ 'OK' if 'active' in (vfy_docker_raw.stdout | default('')) else 'CRIT' }} |
           | UFW | {{ vfy_ufw_raw.stdout | trim | default('n/a') }} | {{ 'OK' if 'active' in (vfy_ufw_raw.stdout | default('')) else 'WARN' }} |
@@ -403,6 +410,11 @@
       ansible.builtin.fail:
         msg: "CRITICAL: memory {{ vfy_mem_mb }}M available < {{ vault_mem_crit_mb | default(200) }}M"
       when: vfy_mem_mb | int < (vault_mem_crit_mb | default(200)) | int
+
+    - name: "verify | fail if swap critical"
+      ansible.builtin.fail:
+        msg: "CRITICAL: swap {{ vfy_swap_pct }}% >= {{ vault_swap_crit_pct | default(80) }}%"
+      when: vfy_swap_pct | int >= (vault_swap_crit_pct | default(80)) | int
 
     - name: "verify | fail if docker not active"
       ansible.builtin.fail:

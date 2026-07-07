@@ -1,6 +1,8 @@
 # Health rules
 
 Formal criteria for VPS state. Used by `99-verify.yml`, `health-trend`, and the monitoring poller.
+Architecture and rationale: [`architecture.md`](../architecture.md#monitoring-architecture),
+[`ADR-0007`](../adr/0007-external-watchdog-and-resource-alerts.md).
 
 ---
 
@@ -31,11 +33,14 @@ Formal criteria for VPS state. Used by `99-verify.yml`, `health-trend`, and the 
 | Metric | OK | WARN | CRIT |
 |---|---|---|---|
 | `mem_available_mb` | > 500 MB | 200–500 MB | < 200 MB |
-| `swap_used_pct` | < 40 % | 40–79 % | ≥ 80 % |
+| `swap_used_pct` | < 60 % | 60–79 % | ≥ 80 % |
+| Docker container memory | < 80 % of limit | 80–94 % | ≥ 95 % |
 
 **Actions:**
 - WARN → log; check `docker stats --no-stream` for OOM candidates.
 - CRIT → log + Telegram alert + include top-5 processes by RSS in the alert.
+- `openclaw-openclaw-gateway-1` above 80% of its Docker memory limit is an early WARN because it has
+  previously OOMed without `maxtg_bridge` being the failing process.
 
 ### Load average (5 min)
 
@@ -63,6 +68,7 @@ Formal criteria for VPS state. Used by `99-verify.yml`, `health-trend`, and the 
 | All expected containers running | all | — | at least one down |
 | Healthcheck (http / tcp / docker) | ok | — | fail |
 | RestartCount over 24 h | 0–2 | 3–9 | ≥ 10 |
+| High-risk container RestartCount increase | no increase | any increase | repeated increase plus OOM |
 
 **Actions:**
 - Container not running → CRIT + Telegram with name + last 20 lines of `docker logs`.
@@ -81,12 +87,23 @@ Formal criteria for VPS state. Used by `99-verify.yml`, `health-trend`, and the 
 
 | Metric | OK | WARN | CRIT |
 |---|---|---|---|
-| `dmesg \| grep "oom-kill"` over 1 h | 0 | — | > 0 |
+| kernel/cgroup OOM over monitor lookback window | 0 | — | > 0 |
 
 **Actions:**
 - CRIT → Telegram alert with process name; check limits in `docs/containers.md`.
 - Repeated OpenClaw Gateway OOMs must not be masked by switching it back to `restart=unless-stopped`;
   keep the bounded restart policy so the VPS remains available for `maxtg_bridge` and SSH.
+
+### External watchdog
+
+| Metric | OK | WARN | CRIT |
+|---|---|---|---|
+| Cross-host TCP/443 reachability | reachable | first failed probe | two consecutive failed probes |
+
+**Actions:**
+- WARN → wait for the next probe; transient SSH/network blips can happen.
+- CRIT → Telegram alert from the checking VPS; inspect provider console, host power state, and
+  out-of-band graphs before assuming an application-level outage.
 
 ---
 

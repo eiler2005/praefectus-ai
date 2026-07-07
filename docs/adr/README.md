@@ -12,6 +12,7 @@ This directory captures the *why* behind PraefectusAI's invariants. Each ADR fol
 | [0004](0004-raw-module-for-ssh-pipelining.md) | `raw` module + `gather_facts: false` for SSH pipelining compatibility | Accepted |
 | [0005](0005-override-files-as-host-policy-zone.md) | `docker-compose.override.local.yml` as the host-policy zone | Accepted |
 | [0006](0006-agents-md-contract-pattern.md) | `AGENTS.md` as a hard contract for LLM agents | Accepted |
+| [0007](0007-external-watchdog-and-resource-alerts.md) | External watchdog and early resource alerts | Accepted |
 
 ## When to add an ADR
 

@@ -1,5 +1,7 @@
 ---
-# Installs VPS health monitoring: Python poller + systemd timer (every 5 min).
+# Installs VPS health monitoring:
+#   - Python poller + systemd timer on each VPS (every 5 min)
+#   - External cross-host reachability watchdog (every 1 min, TCP/443 by default)
 #
 # Required vault vars:
 #   vault_tg_infra_bot_token: "bot_token"
@@ -16,12 +18,17 @@
 # Telegram test:
 #   ssh deploy@<vps> 'sudo python3 /usr/local/bin/vps-monitor.py --test-alert'
 #
+# External watchdog test:
+#   ssh deploy@<vps> 'sudo python3 /usr/local/bin/vps-external-watchdog.py --test-alert'
+#
 # Control-machine shortcut:
 #   ./modules/monitoring/bin/run-check
 #   ./modules/monitoring/bin/run-check --test-alert
+#   ./modules/monitoring/bin/run-check --watchdog-test
 #
-# Disable the timer:
+# Disable timers:
 #   ssh deploy@<vps> 'sudo systemctl disable --now vps-monitor.timer'
+#   ssh deploy@<vps> 'sudo systemctl disable --now vps-external-watchdog.timer'
 
 - name: "20 | VPS monitoring — install poller + timer"
   hosts: vps
@@ -39,7 +46,7 @@
           Without Telegram the monitor installs and runs, but sends no alerts.
       when:
         - vault_tg_infra_bot_token is not defined or vault_tg_infra_bot_token | length == 0
-        - vault_tg_infra_chat_id is not defined or vault_tg_infra_chat_id | length == 0
+          or vault_tg_infra_chat_id is not defined or vault_tg_infra_chat_id | length == 0
       ignore_errors: true  # warn, don't abort — monitoring works without TG
 
     - name: "20 | role | monitoring"
@@ -67,14 +74,19 @@
           - "MONITORING INSTALLED — {{ inventory_hostname }}"
           - "============================================"
           - "Timer: vps-monitor.timer (every 5 min)"
+          - "External watchdog: vps-external-watchdog.timer (every 1 min)"
           - "Script: /usr/local/bin/vps-monitor.py"
+          - "Watchdog script: /usr/local/bin/vps-external-watchdog.py"
           - "Log: /var/log/vps-monitor.log"
+          - "Watchdog log: /var/log/vps-external-watchdog.log"
           - ""
           - "Manual check from Mac:"
           - "  ./modules/monitoring/bin/run-check"
           - "  ./modules/monitoring/bin/run-check --test-alert"
+          - "  ./modules/monitoring/bin/run-check --watchdog-test"
           - ""
           - "Or directly on VPS:"
           - "  ssh deploy@<vps> 'sudo python3 /usr/local/bin/vps-monitor.py --once'"
           - "  ssh deploy@<vps> 'sudo python3 /usr/local/bin/vps-monitor.py --test-alert'"
+          - "  ssh deploy@<vps> 'sudo python3 /usr/local/bin/vps-external-watchdog.py --once'"
           - "============================================"

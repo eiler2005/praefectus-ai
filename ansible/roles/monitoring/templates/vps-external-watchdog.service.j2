@@ -1,0 +1,10 @@
+[Unit]
+Description=VPS external reachability watchdog (single check run)
+After=network-online.target
+
+[Service]
+Type=oneshot
+ExecStart=/usr/bin/python3 /usr/local/bin/vps-external-watchdog.py --once
+StandardOutput=journal
+StandardError=journal
+User=root

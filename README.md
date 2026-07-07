@@ -128,7 +128,7 @@ The actual hands-on work — what runs on your VPS in your name, with the playbo
 - **Caps container resources** — applies memory, CPU, PID, restart, and log guardrails per container via `docker-compose.override.local.yml`, with `docker update` for instant effect where Docker supports it. Never edits the application's own compose file. ([`60-docker-limits.yml`](ansible/playbooks/60-docker-limits.yml), [`70-docker-limits-critical.yml`](ansible/playbooks/70-docker-limits-critical.yml))
 - **Hardens SSH and patches the OS** — `fail2ban` sshd jail (24 h ban after 3 retries), `unattended-upgrades` for `-security` only (no reboots), sshd `MaxSessions` enforcement. ([`40-security.yml`](ansible/playbooks/40-security.yml))
 - **Backs up application data** — daily encrypted snapshot to Backblaze B2 via `restic`. Operator holds the encryption password; even the agent can't read its own backups. ([`30-backup.yml`](ansible/playbooks/30-backup.yml))
-- **Watches health every 5 minutes** — disk, memory, swap, load, container restart counts. Telegram alert on the first amber. ([`20-monitoring.yml`](ansible/playbooks/20-monitoring.yml))
+- **Watches health every 5 minutes** — disk, memory, swap, load, recent OOMs, container memory pressure, and restart counts; a separate 1-minute external watchdog checks cross-host reachability. Telegram alert on the first amber. ([`20-monitoring.yml`](ansible/playbooks/20-monitoring.yml))
 - **Runs a read-only health gate on demand** — disk, memory, swap, load, Docker daemon, container status, UFW, restart counts, app dirs, host guardrail files, systemd timers, and restricted TCP listeners. Structured JSON for trends; markdown summary for humans. ([`99-verify.yml`](ansible/playbooks/99-verify.yml))
 - **Detects drift over time** — reads N recent reports, surfaces slow regressions in disk / memory / swap / restart counts. ([`health-trend`](modules/health-trends/bin/health-trend))
 - **Audits the firewall and ports** — compares live `ss -tlnp` against your documented port map; flags new, missing, or unsafe-bound listeners. ([`port-audit`](modules/port-audit/bin/port-audit))
@@ -272,7 +272,7 @@ Secrets live encrypted in `ansible/group_vars/all/vault.yml`; the vault password
 | 10 | `10-disk-cleanup.yml` | One-shot cleanup: apt clean, journal vacuum, filtered docker prune, logrotate. Volumes untouched. | yes |
 | 11a | `11-periodic-cleanup-setup.yml` | Installs `/usr/local/bin/vps-periodic-cleanup.sh` + systemd timer (Sun 03:00 UTC). | yes (one-shot setup) |
 | 11b | `11-schedule-cleanup.yml` | Alternative weekly cleanup timer with `/var/log/vps-weekly-cleanup.log`. | yes (one-shot setup) |
-| 20 | `20-monitoring.yml` | Deploys Python poller + systemd timer (5 min). Sends Telegram alerts on `WARN` / `CRIT`. | yes |
+| 20 | `20-monitoring.yml` | Deploys Python poller (5 min) plus external cross-host watchdog (1 min). Sends Telegram alerts on `WARN` / `CRIT`. | yes |
 | 30 | `30-backup.yml` | restic + B2: encrypted offsite backups of application data. Daily timer at 02:00 UTC. | yes (one-shot setup) |
 | 40 | `40-security.yml` | `fail2ban` (sshd jail), `unattended-upgrades` (`-security` only), sshd `MaxSessions` enforcement, UFW audit. | yes |
 | 50 | `50-syncthing-audit.yml` | Reports `*.sync-conflict-*`, large files, peer status. Writes `reports/syncthing-audit-*.md`. | read + report |

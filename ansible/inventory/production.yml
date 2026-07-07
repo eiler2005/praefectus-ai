@@ -44,6 +44,10 @@ all:
                   owner: router_configuration
                   purpose: Channel M stale listener watchdog timer
               expected_systemd_timers:
+                - name: vps-monitor.timer
+                  owner: vps_management
+                - name: vps-external-watchdog.timer
+                  owner: vps_management
                 - name: channel-m-reverse-firewall.timer
                   owner: router_configuration
                 - name: channel-m-reverse-listener-watchdog.timer
@@ -68,5 +72,10 @@ all:
                 - name: moex-futoi-bot-1
                   owner: moex_futoi
                   healthcheck: docker
+              expected_systemd_timers:
+                - name: vps-monitor.timer
+                  owner: vps_management
+                - name: vps-external-watchdog.timer
+                  owner: vps_management
         vps_bootstrap:
           hosts: {}

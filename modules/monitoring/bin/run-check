@@ -6,8 +6,12 @@
 #   ./modules/monitoring/bin/run-check               # health check
 #   ./modules/monitoring/bin/run-check --host vps-hostkey-hermes
 #   ./modules/monitoring/bin/run-check --test-alert  # тест Telegram
+#   ./modules/monitoring/bin/run-check --watchdog     # external watchdog check
+#   ./modules/monitoring/bin/run-check --watchdog-test
 #   ./modules/monitoring/bin/run-check --log         # показать последние 50 строк лога
+#   ./modules/monitoring/bin/run-check --watchdog-log
 #   ./modules/monitoring/bin/run-check --status      # статус systemd timer
+#   ./modules/monitoring/bin/run-check --watchdog-status
 
 set -euo pipefail
 
@@ -21,14 +25,18 @@ HOST_ALIAS="${VPS_TARGET:-vps-hetzner-prod}"
 while [[ $# -gt 0 ]]; do
   case "$1" in
     --host)
-      HOST_ALIAS="${2:?usage: run-check [--host <inventory-host>] [--test-alert | --log | --status]}"
+      HOST_ALIAS="${2:?usage: run-check [--host <inventory-host>] [--test-alert | --watchdog | --watchdog-test | --log | --watchdog-log | --status | --watchdog-status]}"
       shift 2
       continue ;;
     --test-alert) ACTION="test-alert" ;;
+    --watchdog)   ACTION="watchdog" ;;
+    --watchdog-test) ACTION="watchdog-test" ;;
     --log)        ACTION="log" ;;
+    --watchdog-log) ACTION="watchdog-log" ;;
     --status)     ACTION="status" ;;
+    --watchdog-status) ACTION="watchdog-status" ;;
     --help|-h)
-      echo "Usage: run-check [--host <inventory-host>] [--test-alert | --log | --status]"
+      echo "Usage: run-check [--host <inventory-host>] [--test-alert | --watchdog | --watchdog-test | --log | --watchdog-log | --status | --watchdog-status]"
       exit 0 ;;
     *)
       echo "ERROR: unknown argument: $1" >&2
@@ -53,16 +61,38 @@ case "${ACTION}" in
     echo ""
     "${SSH_HELPER}" --host "${HOST_ALIAS}" "sudo python3 /usr/local/bin/vps-monitor.py --test-alert"
     ;;
+  watchdog)
+    echo "Running external watchdog check on ${HOST_ALIAS}..." >&2
+    echo ""
+    "${SSH_HELPER}" --host "${HOST_ALIAS}" "sudo python3 /usr/local/bin/vps-external-watchdog.py --once"
+    ;;
+  watchdog-test)
+    echo "Sending external watchdog test Telegram alert via ${HOST_ALIAS}..." >&2
+    echo ""
+    "${SSH_HELPER}" --host "${HOST_ALIAS}" "sudo python3 /usr/local/bin/vps-external-watchdog.py --test-alert"
+    ;;
   log)
     echo "Last 50 lines of /var/log/vps-monitor.log:" >&2
     echo ""
     "${SSH_HELPER}" --host "${HOST_ALIAS}" \
       "sudo tail -50 /var/log/vps-monitor.log 2>/dev/null || echo '(log not found — monitoring not installed?)'"
     ;;
+  watchdog-log)
+    echo "Last 50 lines of /var/log/vps-external-watchdog.log:" >&2
+    echo ""
+    "${SSH_HELPER}" --host "${HOST_ALIAS}" \
+      "sudo tail -50 /var/log/vps-external-watchdog.log 2>/dev/null || echo '(log not found — external watchdog not installed?)'"
+    ;;
   status)
     echo "Monitoring timer status on ${HOST_ALIAS}:" >&2
     echo ""
     "${SSH_HELPER}" --host "${HOST_ALIAS}" \
       "systemctl status vps-monitor.timer 2>/dev/null || echo 'timer not found — run: ansible-playbook playbooks/20-monitoring.yml'"
+    ;;
+  watchdog-status)
+    echo "External watchdog timer status on ${HOST_ALIAS}:" >&2
+    echo ""
+    "${SSH_HELPER}" --host "${HOST_ALIAS}" \
+      "systemctl status vps-external-watchdog.timer 2>/dev/null || echo 'timer not found — run: ansible-playbook playbooks/20-monitoring.yml'"
     ;;
 esac

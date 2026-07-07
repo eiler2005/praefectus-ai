@@ -1,0 +1,164 @@
+#!/usr/bin/env python3
+# vps-external-watchdog.py — cross-host reachability watchdog
+# Managed by vps_management. Run manually: python3 /usr/local/bin/vps-external-watchdog.py --once
+
+import argparse, datetime, json, os, socket, subprocess, sys, time, urllib.error, urllib.request
+
+TG_BOT_TOKEN = "{{ vault_tg_infra_bot_token | default('') }}"
+TG_CHAT_ID   = "{{ vault_tg_infra_chat_id | default('') }}"
+TG_TOPIC_ID  = "{{ vault_tg_infra_topic_id | default('') }}"
+HOST_NAME    = "{{ vps_display_name | default(inventory_hostname) }}"
+
+CONNECT_TIMEOUT_SECONDS = {{ vault_external_watchdog_timeout_seconds | default(5) }}
+FAIL_AFTER = {{ vault_external_watchdog_fail_after | default(2) }}
+DEDUP_TTL = {{ vault_external_watchdog_dedup_ttl | default(900) }}
+
+WATCHDOG_TARGETS = [
+{% for h in groups.get('vps', []) if h != inventory_hostname %}
+    {
+        "name": "{{ hostvars[h].vps_display_name | default(h) }}",
+        "host": "{{ hostvars[h].ansible_host }}",
+        "mode": "{{ vault_external_watchdog_probe_mode | default('tcp') }}",
+        "port": {{ vault_external_watchdog_probe_port | default(443) | int }},
+    },
+{% endfor %}
+]
+
+STATE_FILE = "/opt/vps-monitor/external-watchdog-state.json"
+LOG_FILE = "/var/log/vps-external-watchdog.log"
+
+def log(msg):
+    ts = datetime.datetime.now(datetime.timezone.utc).strftime("%Y-%m-%d %H:%M:%S")
+    line = f"[{ts}] {msg}"
+    print(line)
+    try:
+        with open(LOG_FILE, "a") as f:
+            f.write(line + "\n")
+    except Exception:
+        pass
+
+def load_state():
+    try:
+        with open(STATE_FILE) as f:
+            return json.load(f)
+    except Exception:
+        return {}
+
+def save_state(state):
+    try:
+        os.makedirs(os.path.dirname(STATE_FILE), exist_ok=True)
+        with open(STATE_FILE, "w") as f:
+            json.dump(state, f, indent=2)
+    except Exception as e:
+        log(f"WARN: could not save state: {e}")
+
+def send_telegram(text, silent=False):
+    if not TG_BOT_TOKEN or not TG_CHAT_ID:
+        log("TELEGRAM: not configured (vault_tg_infra_bot_token / vault_tg_infra_chat_id missing)")
+        return False
+    payload = {
+        "chat_id": TG_CHAT_ID,
+        "text": text,
+        "parse_mode": "HTML",
+        "disable_notification": silent,
+    }
+    if TG_TOPIC_ID:
+        payload["message_thread_id"] = TG_TOPIC_ID
+    data = json.dumps(payload).encode()
+    url = f"https://api.telegram.org/bot{TG_BOT_TOKEN}/sendMessage"
+    try:
+        req = urllib.request.Request(url, data=data, headers={"Content-Type": "application/json"})
+        with urllib.request.urlopen(req, timeout=10) as resp:
+            resp.read()
+        return True
+    except urllib.error.HTTPError as e:
+        log(f"TELEGRAM ERROR: HTTP {e.code} - {e.read().decode()[:200]}")
+    except Exception as e:
+        log(f"TELEGRAM ERROR: {e}")
+    return False
+
+def alert(key, text, level="crit", state=None, force=False):
+    now = int(time.time())
+    if state is not None and not force:
+        last_sent = state.get(f"alert:{key}", 0)
+        if now - last_sent < DEDUP_TTL:
+            log(f"DEDUP skip {key} (last sent {now - last_sent}s ago)")
+            return
+    emoji = "🟡" if level == "warn" else "🔴"
+    msg = f"{emoji} <b>{level.upper()}</b> | external watchdog from {HOST_NAME}\n{text}"
+    log(f"ALERT [{level}] {key}: {text[:100]}")
+    ok = send_telegram(msg, silent=(level == "warn"))
+    if ok and state is not None:
+        state[f"alert:{key}"] = now
+
+def check_target(target):
+    if target.get("mode", "icmp") == "icmp":
+        try:
+            r = subprocess.run(
+                ["ping", "-c", "1", "-W", str(CONNECT_TIMEOUT_SECONDS), target["host"]],
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+                timeout=CONNECT_TIMEOUT_SECONDS + 2,
+                check=False,
+            )
+            return r.returncode == 0, "PingFailed" if r.returncode else ""
+        except Exception as e:
+            return False, e.__class__.__name__
+    try:
+        with socket.create_connection((target["host"], int(target["port"])), timeout=CONNECT_TIMEOUT_SECONDS):
+            return True, ""
+    except Exception as e:
+        return False, e.__class__.__name__
+
+def run_once(test_alert=False):
+    if test_alert:
+        ok = send_telegram(f"🧪 <b>TEST</b> | external watchdog test from {HOST_NAME}", silent=True)
+        log("OK" if ok else "FAILED (check TG tokens in vault)")
+        return 0 if ok else 2
+
+    log("=== External watchdog START ===")
+    state = load_state()
+    exit_code = 0
+
+    if not WATCHDOG_TARGETS:
+        log("No external watchdog targets configured")
+        save_state(state)
+        return 0
+
+    for target in WATCHDOG_TARGETS:
+        name = target["name"]
+        mode = target.get("mode", "icmp")
+        port = int(target["port"])
+        endpoint = "icmp" if mode == "icmp" else f"tcp/{port}"
+        ok, err = check_target(target)
+        fail_key = f"fail_count:{name}:{endpoint}"
+        was_down_key = f"was_down:{name}:{endpoint}"
+        if ok:
+            previous_fail_count = int(state.get(fail_key, 0))
+            log(f"OK {name} {endpoint}")
+            if state.get(was_down_key):
+                alert(f"recovered:{name}:{endpoint}", f"{name} {endpoint} reachable again after {previous_fail_count} failed checks", level="warn", state=state, force=True)
+            state[fail_key] = 0
+            state[was_down_key] = False
+            continue
+
+        fail_count = int(state.get(fail_key, 0)) + 1
+        state[fail_key] = fail_count
+        log(f"FAIL {name} {endpoint} count={fail_count} err={err}")
+        if fail_count >= FAIL_AFTER:
+            state[was_down_key] = True
+            alert(f"down:{name}:{endpoint}", f"{name} is not reachable on {endpoint} from {HOST_NAME} ({fail_count} consecutive failures, last error {err})", level="crit", state=state)
+            exit_code = 2
+        elif exit_code == 0:
+            exit_code = 1
+
+    save_state(state)
+    log("=== External watchdog END ===")
+    return exit_code
+
+if __name__ == "__main__":
+    parser = argparse.ArgumentParser(description="vps-external-watchdog")
+    parser.add_argument("--once", action="store_true", help="Run one check and exit")
+    parser.add_argument("--test-alert", action="store_true", help="Send test Telegram message and exit")
+    args = parser.parse_args()
+    sys.exit(run_once(test_alert=args.test_alert))
