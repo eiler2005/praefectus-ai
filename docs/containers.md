@@ -43,6 +43,10 @@ These entries are host policy owned by PraefectusAI and persisted through
 Do not reduce LightRAG below `2304m` without coordinating with
 `openclaw_firststeps`; the current graph has previously OOMed at lower caps.
 
+Resource pressure and a Docker boot-order cycle are separate incident tracks.
+Use the host monitor plus [docker boot and OOM recovery](runbooks/docker-boot-and-oom.md)
+to establish evidence before changing an app limit or restarting a container.
+
 ---
 
 ## Per-container detail (template)

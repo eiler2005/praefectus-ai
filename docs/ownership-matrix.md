@@ -12,6 +12,7 @@ This document is meant to be **forked and customised** for your deployment. The 
 | `/etc/ufw/` | PraefectusAI | firewall rules | Yes |
 | `/etc/fail2ban/` | PraefectusAI | jails | Yes |
 | `/etc/systemd/system/` | PraefectusAI | host-level units (monitoring, backup) | Yes for own units only |
+| `/etc/systemd/system/docker.service` when a routing-owned resolver bridge guard is enabled | `router_configuration` | source-controlled narrow override that prevents a Docker/resolver ordering cycle | No; observe/report and coordinate with routing owner |
 | `/etc/systemd/system/channel-m-reverse-firewall.*` | `router_configuration` | Channel M reverse docker bridge firewall persistence | No; verify only from this repo |
 | `/etc/systemd/system/channel-m-reverse-listener-watchdog.*` | `router_configuration` | Channel M stale reverse listener recovery | No; verify only from this repo |
 | `/etc/logrotate.d/vps-management` | PraefectusAI | logrotate for system services | Yes |

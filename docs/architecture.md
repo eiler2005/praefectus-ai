@@ -69,6 +69,13 @@ OOM events. This is intentionally host-level: it can warn that
 `openclaw-openclaw-gateway-1` is pushing the VPS toward OOM without claiming
 ownership of OpenClaw application behavior.
 
+The same monitor also detects a Docker `systemd` ordering cycle in the current
+boot journal. It emits a non-destructive WARN because a cycle can prevent a
+routing-owned resolver or edge container from starting after reboot even when
+SSH remains reachable. The monitor records only the condition, not raw journal
+content; remediation belongs to the owner of the participating units. See
+[`runbooks/docker-boot-and-oom.md`](runbooks/docker-boot-and-oom.md).
+
 The external watchdog is the outside-view layer. Each managed VPS probes the
 other managed VPS over TCP/443 by default. SSH and ICMP are not assumed to be
 usable between providers or firewall profiles, so the probe checks the stable

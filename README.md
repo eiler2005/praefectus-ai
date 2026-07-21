@@ -35,7 +35,7 @@ PraefectusAI is your AI sysadmin. It works for you 24/7. It costs you nothing (M
 
 | Cadence | What happens | Why you care |
 |---|---|---|
-| every 5 minutes | Health check on disk, memory, swap, load, container restarts. Telegram alert the moment something goes amber. | You learn about a problem before your users do. |
+| every 5 minutes | Health check on disk, memory, swap, load, container restarts and current-boot Docker ordering cycles. Telegram alert the moment something goes amber. | You learn about a problem before your users do. |
 | every Sunday 03:00 UTC | Safe cleanup of apt cache, `journalctl` (capped at 14 d / 500 MB), filtered `docker prune` (`--filter "until=24h"`). **Volumes are never touched.** | Disk-full outages stop happening. |
 | every day 02:00 UTC | Encrypted backup of your application data to Backblaze B2 via `restic`. The password is yours alone. | If the VPS dies tomorrow, you lose hours, not weeks. |
 
@@ -329,6 +329,7 @@ See [`SECURITY.md`](SECURITY.md) for the full threat-model table, mitigations, a
 | [`docs/overview.md`](docs/overview.md) | Full repo navigation index |
 | [`docs/dashboard.md`](docs/dashboard.md) | Current state snapshot (regenerated) |
 | [`docs/containers.md`](docs/containers.md) | Container inventory + resource limits |
+| [`docs/runbooks/docker-boot-and-oom.md`](docs/runbooks/docker-boot-and-oom.md) | Docker boot-order, firewall boundary and OOM incident recovery |
 | [`docs/ports.md`](docs/ports.md) | Canonical port map |
 | [`docs/firewall.md`](docs/firewall.md) | UFW rules |
 | [`docs/runbooks/`](docs/runbooks/) | Incident decision trees |

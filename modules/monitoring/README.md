@@ -22,6 +22,8 @@ A small Python poller deployed to `/usr/local/bin/vps-monitor.py`, run by a syst
 - Reads disk, memory, load, swap.
 - Checks recent kernel/cgroup OOM evidence.
 - Checks Docker container memory pressure and restart counts.
+- Warns when the current boot systemd journal shows a Docker ordering cycle;
+  it reports the condition without copying raw journal text into alerts.
 - Compares against thresholds in [`docs/runbooks/health-rules.md`](../../docs/runbooks/health-rules.md).
 - Sends Telegram alerts on `WARN` / `CRIT` (when `vault_tg_*` are set).
 
@@ -40,3 +42,5 @@ from vault when a different mutually reachable endpoint is preferred.
 ## Output sample
 
 See [`examples/sample-monitor-alert.md`](../../examples/sample-monitor-alert.md).
+For the safe triage and ownership boundary, see
+[`docs/runbooks/docker-boot-and-oom.md`](../../docs/runbooks/docker-boot-and-oom.md).

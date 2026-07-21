@@ -77,7 +77,7 @@ flowchart LR
 |---|---|---|---|
 | SSH access | `/etc/ssh/`, `/home/deploy/.ssh/authorized_keys` | `00-bootstrap.yml`, `40-security.yml`, Vault-backed SSH helpers | direct SSH check, MaxSessions check, scoped Channel M key preserved |
 | Firewall | UFW rules, provider allowlist outside repo, Channel M non-UFW iptables exception | `40-security.yml`, `router_configuration` for Channel M exception | UFW active, public ports match `docs/ports.md`, `18057` not public |
-| Docker host | Docker Engine, Compose plugin, `/var/lib/docker` | bootstrap and host maintenance playbooks | Docker active; filtered cleanup only; volumes never pruned automatically |
+| Docker host | Docker Engine, Compose plugin, `/var/lib/docker` | bootstrap and host maintenance playbooks | Docker active, no current-boot ordering cycle; filtered cleanup only; volumes never pruned automatically |
 | Monitoring | `/usr/local/bin/vps-monitor.py`, systemd timer | `20-monitoring.yml` | 5-minute health checks and Telegram alerting |
 | Cleanup | `/usr/local/bin/vps-periodic-cleanup.sh`, `vps-cleanup.timer` | `11-periodic-cleanup-setup.yml` | apt/journal/docker cleanup with retention filters; no volume prune |
 | Backups | restic config/timers, app-data backup paths | `30-backup.yml` | backup timer/status checks; encrypted remote snapshots |

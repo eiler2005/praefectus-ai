@@ -61,6 +61,19 @@ Architecture and rationale: [`architecture.md`](../architecture.md#monitoring-ar
 **Actions:**
 - CRIT → Telegram alert with the last 20 lines of `journalctl -u docker`.
 
+### Docker boot ordering
+
+| Metric | OK | WARN | CRIT |
+|---|---|---|---|
+| current-boot Docker `ordering cycle` / `dependency cycle` | absent | present | — |
+
+**Actions:**
+- WARN → inspect the unit graph; do not restart Docker automatically.
+- Confirm the owner of each unit before any change. A routing resolver may be
+  application-owned even when its dependency affects the host Docker daemon.
+- Follow [docker-boot-and-oom.md](docker-boot-and-oom.md); Docker activity,
+  SSH and a public listener alone do not prove the affected data-plane.
+
 ### Containers (from `vault_expected_containers`)
 
 | Metric | OK | WARN | CRIT |
@@ -93,6 +106,9 @@ Architecture and rationale: [`architecture.md`](../architecture.md#monitoring-ar
 - CRIT → Telegram alert with process name; check limits in `docs/containers.md`.
 - Repeated OpenClaw Gateway OOMs must not be masked by switching it back to `restart=unless-stopped`;
   keep the bounded restart policy so the VPS remains available for `maxtg_bridge` and SSH.
+- OOM and a Docker boot ordering cycle are independent signals. Establish the
+  unit-graph root cause before attributing a public data-plane incident to
+  resource pressure.
 
 ### External watchdog
 

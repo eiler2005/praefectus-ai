@@ -8,6 +8,11 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ## [Unreleased]
 
+- **Docker boot-order early warning**: the host monitor now raises a sanitized
+  current-boot WARN for Docker `systemd` ordering cycles; the new runbook
+  separates unit-graph recovery from provider/UFW access checks and OOM
+  capacity follow-up without crossing application ownership.
+
 ### Added
 
 - Hero banner illustration (`docs/assets/hero-banner.png`) and "The name" section in README.

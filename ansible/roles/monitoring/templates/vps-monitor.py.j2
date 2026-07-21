@@ -144,6 +144,11 @@ def collect():
 
     # Docker daemon
     metrics["docker_active"] = shell("systemctl is-active docker") == "active"
+    docker_ordering_raw = shell(
+        "journalctl -b --no-pager -o cat 2>/dev/null | "
+        "grep -Ei '(ordering cycle|dependency cycle).*docker|docker.*(ordering cycle|dependency cycle)' | tail -20"
+    )
+    metrics["docker_boot_ordering_cycle"] = bool(docker_ordering_raw.strip())
 
     # Containers
     running_raw = shell("docker ps --format '{{ '{{' }}.Names{{ '}}' }}' 2>/dev/null")
@@ -221,6 +226,13 @@ def evaluate(metrics, state):
 
     if not metrics["docker_active"]:
         issues.append(("crit", "docker", "Docker daemon is NOT active"))
+
+    if metrics.get("docker_boot_ordering_cycle"):
+        issues.append((
+            "warn",
+            "docker_boot_ordering_cycle",
+            "Docker systemd ordering cycle in current boot; inspect unit graph before restart",
+        ))
 
     running = metrics["running_containers"]
     for expected in EXPECTED_CONTAINERS:

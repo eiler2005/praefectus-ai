@@ -21,9 +21,12 @@ this fleet: they can be blocked independently from the public service listener.
 PraefectusAI owns a two-layer host monitoring design:
 
 - `vps-monitor.timer` runs on each managed VPS every five minutes and evaluates
-  local host state: disk, available RAM, swap, load, Docker, expected
-  containers, container restarts, Docker memory pressure, and recent
-  kernel/cgroup OOM events.
+local host state: disk, available RAM, swap, load, Docker, expected
+containers, container restarts, Docker memory pressure, and recent
+kernel/cgroup OOM events.
+- The local monitor also emits a current-boot WARN for a Docker `systemd`
+  ordering cycle. It does not restart Docker and does not include raw journal
+  text in an alert; unit remediation remains with the owning project.
 - `vps-external-watchdog.timer` runs on each managed VPS every minute and checks
   peer VPS reachability from outside the checked host.
 - The external probe uses TCP/443 by default because that listener is the
@@ -57,3 +60,6 @@ Negative:
   backups.
 - High swap usage can be detected here, but capacity fixes still need separate
   resource-limit or workload-isolation changes.
+- A Docker ordering-cycle alert reveals a host-level startup defect, but cannot
+  prove application/data-plane recovery; the application owner's active probe
+  remains the closure criterion.
