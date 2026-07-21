@@ -62,6 +62,9 @@ all:
               expected_app_dirs:
                 - /opt/stealth
                 - /opt/moex-futoi
+                - /opt/cheap-intelligence
+              host_backup_paths:
+                - /var/lib/docker/volumes/cheap-intelligence_digest_data/_data
               expected_containers:
                 - name: caddy
                   owner: router_configuration
@@ -72,10 +75,18 @@ all:
                 - name: moex-futoi-bot-1
                   owner: moex_futoi
                   healthcheck: docker
+                - name: ci-digest
+                  owner: AiNativeBook_Draft_26/services/digest-service
+                  healthcheck: docker
+                - name: ci-caddy-inner
+                  owner: AiNativeBook_Draft_26/services/digest-service
+                  healthcheck: docker
               expected_systemd_timers:
                 - name: vps-monitor.timer
                   owner: vps_management
                 - name: vps-external-watchdog.timer
+                  owner: vps_management
+                - name: vps-backup.timer
                   owner: vps_management
         vps_bootstrap:
           hosts: {}

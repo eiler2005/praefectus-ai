@@ -43,11 +43,13 @@ Ports bound to the loopback interface only. Reachable from the VPS itself or via
 | 3001 | TCP | companion local app endpoint | application container | application owner | app health/API |
 | 8384 | TCP | Syncthing Web UI | system (syncthing) | PraefectusAI | `curl /rest/system/ping` |
 | 8020 | TCP | LightRAG app | `lightrag-lightrag-1` | application owner | app health/API |
+| 8080 | TCP | Cheap Intelligence digest API | `ci-digest` | `AiNativeBook_Draft_26/services/digest-service` | `/healthz`; admin only over SSH/loopback |
 | 8092 | TCP | AgentMail email bridge | `agentmail-email-bridge` | application owner | app health/API |
 | 8093 | TCP | Signals bridge | `signals-bridge` | application owner | app health/API |
 | 8094 | TCP | AgentMail work email bridge | `agentmail-work-email-bridge` | application owner | app health/API |
 | 8095 | TCP | Wiki import app | `wiki-import` | application owner | app health/API |
 | 8443 | TCP | Xray local backend | `xray` | routing project | local reverse-proxy/backend check |
+| 8444 | TCP | Cheap Intelligence inner TLS | `ci-caddy-inner` | `AiNativeBook_Draft_26/services/digest-service` | exact-SNI upstream from outer Caddy; container health on internal `:8081` |
 | 18081 | TCP | Channel B/XHTTP local backend | `xray-xhttp` | routing project | local backend check |
 | 18789 | TCP | OpenClaw gateway | `openclaw-openclaw-gateway-1` | application owner | app health/API |
 | 18790 | TCP | OpenClaw gateway companion port | `openclaw-openclaw-gateway-1` | application owner | app health/API |

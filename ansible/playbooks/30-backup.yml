@@ -8,7 +8,8 @@
 #   vault_b2_app_key      — Backblaze B2 application key
 #   vault_b2_bucket       — B2 bucket name (e.g. <project>-prod-backups)
 #   vault_restic_password — restic repo encryption password (generate: pwgen -s 32 1)
-#   vault_backup_paths    — list of paths to back up (optional, has defaults)
+#   vault_backup_paths    — shared list of paths to back up (optional, has defaults)
+#   host_backup_paths     — per-host inventory override for app-owned data paths
 #
 # Workflow:
 #   ansible-playbook playbooks/30-backup.yml --check --diff        # dry-run (setup steps)
@@ -29,7 +30,7 @@
   vars:
     report_dir_local: "{{ playbook_dir }}/../../reports"
     backup_host_id: "{{ inventory_hostname }}"
-    backup_paths: "{{ vault_backup_paths | default(['/opt/maxtg-bridge/data', '/opt/openclaw/workspace', '/opt/obsidian-vault/wiki']) }}"
+    backup_paths: "{{ host_backup_paths | default(vault_backup_paths | default(['/opt/maxtg-bridge/data', '/opt/openclaw/workspace', '/opt/obsidian-vault/wiki'])) }}"
     keep_daily:   7
     keep_weekly:  4
     keep_monthly: 3
@@ -64,6 +65,7 @@
         echo CHANGED
       register: env_write
       changed_when: "'CHANGED' in env_write.stdout"
+      no_log: true
       tags: [setup]
 
     # ---- INIT REPO (idempotent) ----
@@ -214,7 +216,7 @@
           - "================================================="
           - "BACKUP SETUP — {{ backup_host_id }}"
           - "================================================="
-          - "Repo:      b2:{{ vault_b2_bucket }}:/{{ backup_host_id }}"
+          - "Repo:      configured remote / {{ backup_host_id }}"
           - "Schedule:  daily 02:00 UTC (persistent timer)"
           - "Retention: {{ keep_daily }}d / {{ keep_weekly }}w / {{ keep_monthly }}m"
           - "Log:       /var/log/vps-backup.log"

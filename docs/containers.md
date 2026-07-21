@@ -14,6 +14,8 @@ Inventory of every Docker container running on the VPS. Update when adding or re
 | `openclaw-openclaw-gateway-1` | CRITICAL | 1224m / 0.90 CPU / 256 pids / restart `on-failure:5` / logs `10m x3` | OpenClaw gateway; limits from `70-docker-limits-critical.yml`, aligned with `openclaw_firststeps` resource guardrails |
 | `omniroute` | CRITICAL | 512m / 0.25 CPU / 128 pids | LLM route proxy; limits from `70-docker-limits-critical.yml` |
 | `lightrag-lightrag-1` | CRITICAL | 2304m / 2816m swap / 0.45 CPU / 128 pids | Knowledge graph service; 2304m is intentional because lower caps caused cold-start OOM on the current graph |
+| `ci-digest` | HIGH | 256m / 0.50 CPU / 128 pids | Digest subscription API on Hermes; app-owned limits and persistent subscriber volume |
+| `ci-caddy-inner` | HIGH | 128m / 0.25 CPU / 64 pids | Inner TLS terminator for the digest exact-SNI route; loopback-only host bind |
 | `<container-1>` | CRITICAL | `<NN>m` | Source of limit (e.g. `70-docker-limits-critical.yml`) |
 | `<container-2>` | HIGH | `<NN>m` | |
 | `<container-3>` | MEDIUM | `<NN>m` | |
@@ -42,6 +44,17 @@ These entries are host policy owned by PraefectusAI and persisted through
 
 Do not reduce LightRAG below `2304m` without coordinating with
 `openclaw_firststeps`; the current graph has previously OOMed at lower caps.
+
+## Cheap Intelligence digest on Hermes
+
+These containers are owned by `AiNativeBook_Draft_26/services/digest-service` and
+deployed from its `deploy/hermes-stack/` source. PraefectusAI monitors and backs
+up the stack but does not edit its base Compose file.
+
+| Container | Owner | Ports | Data | Healthcheck / recovery |
+|---|---|---|---|---|
+| `ci-digest` | `AiNativeBook_Draft_26/services/digest-service` | `127.0.0.1:8080` | named volume `cheap-intelligence_digest_data` mounted at `/data` | Node `/healthz`; restic backs up the named-volume mountpoint |
+| `ci-caddy-inner` | `AiNativeBook_Draft_26/services/digest-service` | `127.0.0.1:8444` | Caddy certificate/config named volumes; certificates are reissuable | internal `http://127.0.0.1:8081/healthz`; public TLS arrives through routing-owned outer Caddy `:443` |
 
 Resource pressure and a Docker boot-order cycle are separate incident tracks.
 Use the host monitor plus [docker boot and OOM recovery](runbooks/docker-boot-and-oom.md)
