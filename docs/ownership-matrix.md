@@ -41,9 +41,19 @@ Each application running on the VPS is an "owner" with its own deploy pipeline. 
 | `/opt/<app-4>/` | `<app-4-repo>` | router service | application's own deploy script | `mem_limit` |
 | `/opt/moex-futoi/` | `moex_futoi` | MOEX/FUTOI trading signal bot, market data, signal registry, reports, compose deploy files | application's own deploy script | host-level monitoring only; do not edit app compose/env directly |
 | `/opt/cheap-intelligence/` on `vps-hostkey-hermes` | `AiNativeBook_Draft_26/services/digest-service` | digest API, inner Caddy, subscriber/issues volume and app secrets | app-owned `deploy/hermes-stack/` workflow | monitoring + encrypted backup only; do not edit app compose/env from this repo |
+| `/opt/reddit-compass/` on `vps-hostkey-hermes` | `reddit_compass` | trend radar: FastAPI + own Caddy (public HTTPS behind Basic Auth), Ladder paywall proxy, batch collector, both SQLite databases in `reddit-compass_data` | app-owned `deploy/hostkey/deploy.sh` | monitoring only; **not** in `host_backup_paths` (see note below); do not edit app compose/env from this repo |
 | `/opt/<routing-app>/` | `<routing-repo>` | stealth-routing config | routing project ansible | **No** |
 | `/opt/stealth/` on `vps-hostkey-hermes` | `router_configuration` | GhostRoute owned managed egress: Caddy layer4 + Xray/Reality + restricted resolver | `router_configuration` Ansible | verify only; do not edit compose/config from this repo |
 | `/opt/<obsidian-vault>/` | PraefectusAI (Syncthing host) | bidirectional sync with control machine | Syncthing | Yes |
+
+### Note: `reddit-compass` data is not backed up
+
+The `reddit-compass_data` volume holds the accumulated release history (~2 GB and
+growing every collection cycle). It is deliberately **absent** from
+`host_backup_paths`: backups go to a paid B2 repository, and the owner has not
+signed off on that recurring cost. Losing the volume loses the accumulated
+history — collection cannot be replayed for past days. Adding it is an operator
+decision, not a default.
 
 ## What "owner" means
 

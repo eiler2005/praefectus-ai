@@ -63,6 +63,7 @@ all:
                 - /opt/stealth
                 - /opt/moex-futoi
                 - /opt/cheap-intelligence
+                - /opt/reddit-compass
               host_backup_paths:
                 - /var/lib/docker/volumes/cheap-intelligence_digest_data/_data
               expected_containers:
@@ -81,6 +82,15 @@ all:
                 - name: ci-caddy-inner
                   owner: AiNativeBook_Draft_26/services/digest-service
                   healthcheck: docker
+                - name: rc-api
+                  owner: reddit_compass
+                  healthcheck: docker
+                - name: rc-caddy
+                  owner: reddit_compass
+                  healthcheck: docker
+                - name: ladder
+                  owner: reddit_compass
+                  healthcheck: docker
               expected_systemd_timers:
                 - name: vps-monitor.timer
                   owner: vps_management
@@ -88,5 +98,19 @@ all:
                   owner: vps_management
                 - name: vps-backup.timer
                   owner: vps_management
+              restricted_tcp_listeners:
+                # Unauthenticated reddit-compass entrypoints. Docker writes its
+                # DNAT rules straight into the nat/DOCKER chain, bypassing UFW,
+                # so a missing `127.0.0.1:` in the app compose exposes the whole
+                # collected corpus to the internet without any login. That has
+                # already happened once; default scope flags any public bind.
+                # The authenticated public HTTPS entrypoint is deliberately not
+                # listed here — it is meant to be reachable.
+                - port: 8900
+                  name: reddit-compass-local-ui
+                  owner: reddit_compass
+                - port: 8901
+                  name: reddit-compass-api-direct
+                  owner: reddit_compass
         vps_bootstrap:
           hosts: {}
