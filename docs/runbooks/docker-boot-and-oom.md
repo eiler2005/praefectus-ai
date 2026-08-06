@@ -115,6 +115,22 @@ sudo journalctl -k --since '<lookback>' --no-pager
 sudo docker inspect <container> --format '{{.HostConfig.Memory}} {{.HostConfig.NanoCpus}} {{.HostConfig.PidsLimit}} {{.HostConfig.RestartPolicy.Name}}'
 ```
 
+For workloads with a bounded short-lived peak, a small host swap buffer can
+reduce abrupt cgroup pressure, but it must not replace a correct container
+limit or application-level batching. The managed 2 GiB buffer is configured by
+the host playbook and never requires a reboot:
+
+```bash
+cd ansible
+ansible-playbook playbooks/65-host-swap.yml --check --diff --limit <vps_alias>
+ansible-playbook playbooks/65-host-swap.yml --limit <vps_alias>
+```
+
+The playbook refuses to overwrite an existing non-swap `/swapfile`, keeps mode
+`0600`, persists it in `/etc/fstab`, and verifies it with `swapon`. Do not use
+swap as permission to remove application memory limits or run concurrent heavy
+jobs.
+
 For an application container that has exhausted a bounded `on-failure` policy,
 treat the stop as host protection first. Do not change it to an unlimited
 restart loop. Coordinate its memory/CPU/PID override with the application owner

@@ -16,6 +16,7 @@ Inventory of every Docker container running on the VPS. Update when adding or re
 | `lightrag-lightrag-1` | CRITICAL | 2304m / 2816m swap / 0.45 CPU / 128 pids | Knowledge graph service; 2304m is intentional because lower caps caused cold-start OOM on the current graph |
 | `ci-digest` | HIGH | 256m / 0.50 CPU / 128 pids | Digest subscription API on Hermes; app-owned limits and persistent subscriber volume |
 | `ci-caddy-inner` | HIGH | 128m / 0.25 CPU / 64 pids | Inner TLS terminator for the digest exact-SNI route; loopback-only host bind |
+| `moex-futoi-bot-1` | HIGH | 1536m / 2048m memswap / 256 pids | `moex_futoi` FX/Radar bot on Hermes; app-owned compose limit raised after a `fx_compass_full` cgroup OOM; host has a managed 2 GiB swap buffer |
 | `<container-1>` | CRITICAL | `<NN>m` | Source of limit (e.g. `70-docker-limits-critical.yml`) |
 | `<container-2>` | HIGH | `<NN>m` | |
 | `<container-3>` | MEDIUM | `<NN>m` | |
@@ -59,6 +60,15 @@ up the stack but does not edit its base Compose file.
 Resource pressure and a Docker boot-order cycle are separate incident tracks.
 Use the host monitor plus [docker boot and OOM recovery](runbooks/docker-boot-and-oom.md)
 to establish evidence before changing an app limit or restarting a container.
+
+## MOEX/FUTOI on Hermes
+
+`moex-futoi-bot-1` is owned and deployed by `pulsar-trader-lab`. Its production
+compose now uses `mem_limit: 1536m` and `memswap_limit: 2048m`; the shared
+Radar/ML/FX heavy-job mutex and one-thread allocator bounds remain required.
+PraefectusAI owns only the host safety layer: monitoring, the bounded 2 GiB
+`/swapfile`, and read-only verification. Do not edit the app compose, `.env`,
+or SQLite databases from this repository.
 
 ---
 

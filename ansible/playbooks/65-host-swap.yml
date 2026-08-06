@@ -1,0 +1,90 @@
+---
+# Add a bounded host swap buffer for VPS workloads with short-lived memory
+# spikes. This is not a replacement for application-level memory limits.
+
+- name: "65 | Host swap buffer"
+  hosts: vps
+  become: true
+  gather_facts: false
+
+  vars:
+    swap_file: /swapfile
+    swap_size_mb: 2048
+
+  tasks:
+    - name: "65 | audit | active swap devices"
+      ansible.builtin.command: swapon --show=NAME --noheadings
+      register: active_swap
+      changed_when: false
+      failed_when: false
+
+    - name: "65 | audit | swap file"
+      ansible.builtin.stat:
+        path: "{{ swap_file }}"
+      register: swap_file_stat
+
+    - name: "65 | audit | existing swap file type"
+      ansible.builtin.command: "blkid -p -o value -s TYPE {{ swap_file }}"
+      register: swap_file_type
+      changed_when: false
+      failed_when: false
+      when: swap_file_stat.stat.exists
+
+    - name: "65 | guard | reject non-swap file at swap path"
+      ansible.builtin.assert:
+        that:
+          - swap_file_type.stdout | default('') | trim == 'swap'
+        fail_msg: "{{ swap_file }} exists but is not a swap device; review it manually before changing it."
+      when: swap_file_stat.stat.exists and not ansible_check_mode
+
+    - name: "65 | create | allocate swap file"
+      ansible.builtin.command: "fallocate -l {{ swap_size_mb }}M {{ swap_file }}"
+      when: not swap_file_stat.stat.exists
+
+    - name: "65 | resize | extend inactive swap file"
+      ansible.builtin.command: "fallocate -l {{ swap_size_mb }}M {{ swap_file }}"
+      when:
+        - swap_file_stat.stat.exists
+        - swap_file_type.stdout | default('') | trim == 'swap'
+        - (swap_file_stat.stat.size | int) < (swap_size_mb * 1024 * 1024)
+        - swap_file not in (active_swap.stdout_lines | default([]))
+
+    - name: "65 | secure | swap file permissions"
+      ansible.builtin.file:
+        path: "{{ swap_file }}"
+        owner: root
+        group: root
+        mode: "0600"
+
+    - name: "65 | create | initialise swap signature"
+      ansible.builtin.command: "mkswap {{ swap_file }}"
+      when:
+        - not swap_file_stat.stat.exists or
+          (swap_file_stat.stat.exists and swap_file_type.stdout | default('') | trim == 'swap' and
+          (swap_file_stat.stat.size | int) < (swap_size_mb * 1024 * 1024) and
+          swap_file not in (active_swap.stdout_lines | default([])))
+
+    - name: "65 | persist | enable swap at boot"
+      ansible.builtin.lineinfile:
+        path: /etc/fstab
+        line: "{{ swap_file }} none swap sw 0 0"
+        regexp: "^{{ swap_file | regex_escape }}\\s+none\\s+swap\\s"
+        insertafter: EOF
+
+    - name: "65 | activate | enable swap now"
+      ansible.builtin.command: "swapon {{ swap_file }}"
+      when: swap_file not in (active_swap.stdout_lines | default([]))
+
+    - name: "65 | verify | active swap"
+      ansible.builtin.command: swapon --show=NAME,SIZE --bytes --noheadings
+      register: swap_status
+      changed_when: false
+
+    - name: "65 | summary"
+      ansible.builtin.debug:
+        msg:
+          - "HOST SWAP SUMMARY"
+          - "path: {{ swap_file }}"
+          - "target: {{ swap_size_mb }} MiB"
+          - "active: {{ swap_status.stdout_lines | default([]) }}"
+          - "The swap buffer protects short peaks; application limits remain authoritative."
