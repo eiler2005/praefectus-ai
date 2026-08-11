@@ -107,12 +107,24 @@
           --tag {{ backup_host_id }} 2>&1 | tee -a "$LOG"
 
         log "--- forget/prune ---"
-        restic forget \
-          --keep-daily   7 \
-          --keep-weekly  4 \
-          --keep-monthly 3 \
-          --tag {{ backup_host_id }} \
-          --prune 2>&1 | tee -a "$LOG"
+        # B2 lock deletion can briefly lag immediately after a successful backup.
+        # Retry the maintenance pass, but fail honestly if the lock persists.
+        for attempt in 1 2 3; do
+          if restic forget \
+            --keep-daily   7 \
+            --keep-weekly  4 \
+            --keep-monthly 3 \
+            --tag {{ backup_host_id }} \
+            --prune 2>&1 | tee -a "$LOG"; then
+            break
+          fi
+          if [ "$attempt" -eq 3 ]; then
+            log "forget/prune failed after 3 attempts"
+            exit 1
+          fi
+          log "forget/prune lock retry $attempt/3"
+          sleep 5
+        done
 
         log "=== backup done ==="
         SCRIPTEOF
