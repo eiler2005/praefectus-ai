@@ -15,6 +15,7 @@ Inventory of every Docker container running on the VPS. Update when adding or re
 | `omniroute` | CRITICAL | 512m / 0.25 CPU / 128 pids | LLM route proxy; limits from `70-docker-limits-critical.yml` |
 | `lightrag-lightrag-1` | CRITICAL | 2304m / 2816m swap / 0.45 CPU / 128 pids | Knowledge graph service; 2304m is intentional because lower caps caused cold-start OOM on the current graph |
 | `ci-digest` | HIGH | 256m / 0.50 CPU / 128 pids | Digest subscription API on Hermes; app-owned limits and persistent subscriber volume |
+| `ci-digest-postgres` | HIGH | 384m / 0.50 CPU / 128 pids | Private PostgreSQL source of truth for encrypted contacts, consent evidence and delivery queue |
 | `ci-caddy-inner` | HIGH | 128m / 0.25 CPU / 64 pids | Inner TLS terminator for the digest exact-SNI route; loopback-only host bind |
 | `moex-futoi-bot-1` | HIGH | 1536m / 2048m memswap / 256 pids | `moex_futoi` FX/Radar bot on Hermes; app-owned compose limit raised after a `fx_compass_full` cgroup OOM; host has a managed 2 GiB swap buffer |
 | `<container-1>` | CRITICAL | `<NN>m` | Source of limit (e.g. `70-docker-limits-critical.yml`) |
@@ -55,7 +56,12 @@ up the stack but does not edit its base Compose file.
 | Container | Owner | Ports | Data | Healthcheck / recovery |
 |---|---|---|---|---|
 | `ci-digest` | `AiNativeBook_Draft_26/services/digest-service` | `127.0.0.1:8080` | named volume `cheap-intelligence_digest_data` mounted at `/data` | Node `/healthz`; restic backs up the named-volume mountpoint |
+| `ci-digest-postgres` | `AiNativeBook_Draft_26/services/digest-service` | no host port; private `cheap-intelligence_net` only | named volume `cheap-intelligence_digest_postgres` | PostgreSQL healthcheck; restic backs up the named-volume mountpoint |
 | `ci-caddy-inner` | `AiNativeBook_Draft_26/services/digest-service` | `127.0.0.1:8444` | Caddy certificate/config named volumes; certificates are reissuable | internal `http://127.0.0.1:8081/healthz`; public TLS arrives through routing-owned outer Caddy `:443` |
+
+`ci-digest-worker` is an app-owned delivery profile rather than an always-on container. It is
+added to the monitor expectation only at the separately approved email-delivery launch, when
+`DELIVERY_ENABLED=true`, a verified sender domain and an ESP have passed seed tests.
 
 Resource pressure and a Docker boot-order cycle are separate incident tracks.
 Use the host monitor plus [docker boot and OOM recovery](runbooks/docker-boot-and-oom.md)

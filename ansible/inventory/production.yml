@@ -66,6 +66,7 @@ all:
                 - /opt/reddit-compass
               host_backup_paths:
                 - /var/lib/docker/volumes/cheap-intelligence_digest_data/_data
+                - /var/lib/docker/volumes/cheap-intelligence_digest_postgres/_data
               expected_containers:
                 - name: caddy
                   owner: router_configuration
@@ -77,6 +78,9 @@ all:
                   owner: moex_futoi
                   healthcheck: docker
                 - name: ci-digest
+                  owner: AiNativeBook_Draft_26/services/digest-service
+                  healthcheck: docker
+                - name: ci-digest-postgres
                   owner: AiNativeBook_Draft_26/services/digest-service
                   healthcheck: docker
                 - name: ci-caddy-inner
