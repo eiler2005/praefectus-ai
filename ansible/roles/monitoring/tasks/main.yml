@@ -18,6 +18,7 @@
         if (expected_containers is defined and not (expected_containers is string))
         else (vault_expected_containers | default([]))
       }}
+    monitoring_disabled_containers: "{{ disabled_containers | default([]) }}"
 
 # Note: template is rendered locally then uploaded via copy to avoid become: true
 # variable scoping issues that cause Jinja2 vault vars to render as empty.

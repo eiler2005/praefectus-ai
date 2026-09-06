@@ -11,7 +11,7 @@ Inventory of every Docker container running on the VPS. Update when adding or re
 | Container | Criticality | Resource limit | Notes |
 |---|---|---|---|
 | `deploy-bridge-1` | CRITICAL | 512m | `maxtg_bridge` production bridge; MAX egress uses reverse Channel M through VPS docker bridge listener guarded by router_configuration firewall/watchdog units |
-| `openclaw-openclaw-gateway-1` | CRITICAL | 1224m / 0.90 CPU / 256 pids / restart `on-failure:5` / logs `10m x3` | OpenClaw gateway; limits from `70-docker-limits-critical.yml`, aligned with `openclaw_firststeps` resource guardrails |
+| `openclaw-openclaw-gateway-1` | DISABLED | 1224m / 0.90 CPU / 256 pids / restart `on-failure:5` / logs `10m x3` | Intentionally disabled on `vps-hetzner-prod` by operator on 2026-09-06 after repeated resource pressure; data is retained and the monitor excludes it |
 | `omniroute` | CRITICAL | 512m / 0.25 CPU / 128 pids | LLM route proxy; limits from `70-docker-limits-critical.yml` |
 | `lightrag-lightrag-1` | CRITICAL | 2304m / 2816m swap / 0.45 CPU / 128 pids | Knowledge graph service; 2304m is intentional because lower caps caused cold-start OOM on the current graph |
 | `ci-digest` | HIGH | 256m / 0.50 CPU / 128 pids | Digest subscription API on Hermes; app-owned limits and persistent subscriber volume |
@@ -29,6 +29,7 @@ Criticality scale:
 - **HIGH** — degraded mode acceptable for minutes; backup-recoverable
 - **MEDIUM** — internal automation; can be restarted at leisure
 - **LOW** — best-effort; failure does not affect users
+- **DISABLED** — intentionally stopped by the operator; excluded from outage alerts
 
 ---
 
@@ -37,6 +38,15 @@ Criticality scale:
 These entries are host policy owned by PraefectusAI and persisted through
 `docker-compose.override.local.yml`; the base compose files remain
 `openclaw_firststeps` owned.
+
+### Intentional disablement
+
+`openclaw-openclaw-gateway-1` is intentionally stopped on `vps-hetzner-prod` as
+of 2026-09-06. The host keeps `/opt/openclaw/config` and its Docker resources
+for a possible owner-led recovery, but PraefectusAI must not restart the
+gateway automatically or treat its absence as a new incident. Remove the
+`disabled_containers` inventory marker only after `openclaw_firststeps` has
+approved a re-enable plan.
 
 | Container | Owner | Ports | Data | Limit source |
 |---|---|---|---|---|

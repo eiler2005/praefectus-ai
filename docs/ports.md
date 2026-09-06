@@ -51,8 +51,8 @@ Ports bound to the loopback interface only. Reachable from the VPS itself or via
 | 8443 | TCP | Xray local backend | `xray` | routing project | local reverse-proxy/backend check |
 | 8444 | TCP | Cheap Intelligence inner TLS | `ci-caddy-inner` | `AiNativeBook_Draft_26/services/digest-service` | exact-SNI upstream from outer Caddy; container health on internal `:8081` |
 | 18081 | TCP | Channel B/XHTTP local backend | `xray-xhttp` | routing project | local backend check |
-| 18789 | TCP | OpenClaw gateway | `openclaw-openclaw-gateway-1` | application owner | app health/API |
-| 18790 | TCP | OpenClaw gateway companion port | `openclaw-openclaw-gateway-1` | application owner | app health/API |
+| 18789 | TCP | OpenClaw gateway | `openclaw-openclaw-gateway-1` | application owner | intentionally disabled on `vps-hetzner-prod` since 2026-09-06 |
+| 18790 | TCP | OpenClaw gateway companion port | `openclaw-openclaw-gateway-1` | application owner | intentionally disabled on `vps-hetzner-prod` since 2026-09-06 |
 | 20128 | TCP | OmniRoute app endpoint | `omniroute` | application owner | app health/API |
 | 20129 | TCP | OmniRoute companion endpoint | `omniroute` | application owner | app health/API |
 | 54321 | TCP | Xray API/local control endpoint | `xray` | routing project | local control only |

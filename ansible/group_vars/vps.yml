@@ -25,6 +25,9 @@ logrotate_targets:
 # is kept as the vps-hetzner-prod default.
 expected_app_dirs: []
 expected_containers: "{{ vault_expected_containers | default([]) }}"
+# Intentionally disabled application containers are excluded from monitoring
+# and role-level container health checks until the operator re-enables them.
+disabled_containers: []
 expected_host_files: []
 expected_systemd_timers: []
 restricted_tcp_listeners: []

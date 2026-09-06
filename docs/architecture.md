@@ -67,7 +67,9 @@ available RAM, swap usage, Docker daemon state, expected containers, high-risk
 container restart increases, Docker memory pressure, and recent kernel/cgroup
 OOM events. This is intentionally host-level: it can warn that
 `openclaw-openclaw-gateway-1` is pushing the VPS toward OOM without claiming
-ownership of OpenClaw application behavior.
+ownership of OpenClaw application behavior. A host may explicitly list an
+operator-disabled container in `disabled_containers`; the monitor then retains
+the inventory record without treating the stopped service as an outage.
 
 The same monitor also detects a Docker `systemd` ordering cycle in the current
 boot journal. It emits a non-destructive WARN because a cycle can prevent a

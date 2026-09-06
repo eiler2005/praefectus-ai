@@ -25,9 +25,13 @@ OOM_LOOKBACK_MINUTES = {{ vault_oom_lookback_minutes | default(10) }}
 HIGH_RISK_RESTART_WARN = {{ vault_high_risk_restart_warn | default(1) }}
 
 {% set monitor_expected_containers = monitoring_expected_containers | default(expected_containers | default([])) %}
+{% set monitor_disabled_containers = monitoring_disabled_containers | default([]) %}
 EXPECTED_CONTAINERS = [
 {% for c in monitor_expected_containers %}
-    "{{ c.name if c is mapping else c }}",
+{% set c_name = c.name if c is mapping else c %}
+{% if c_name not in monitor_disabled_containers %}
+    "{{ c_name }}",
+{% endif %}
 {% endfor %}
 ]
 HIGH_RISK_CONTAINERS = [

@@ -82,11 +82,16 @@ Architecture and rationale: [`architecture.md`](../architecture.md#monitoring-ar
 | Healthcheck (http / tcp / docker) | ok | — | fail |
 | RestartCount over 24 h | 0–2 | 3–9 | ≥ 10 |
 | High-risk container RestartCount increase | no increase | any increase | repeated increase plus OOM |
+| Container listed in `disabled_containers` | intentionally stopped | — | — |
 
 **Actions:**
 - Container not running → CRIT + Telegram with name + last 20 lines of `docker logs`.
+- A container listed in the host's `disabled_containers` inventory variable is
+  intentionally stopped: exclude it from expected-container alerts and do not
+  restart it automatically.
 - RestartCount ≥ 3 → WARN in log; check `docker logs <name>`.
-- If `openclaw-openclaw-gateway-1` is stopped after exhausting `restart=on-failure:5`, treat that as
+- If `openclaw-openclaw-gateway-1` is stopped after exhausting `restart=on-failure:5` and is not
+  listed in `disabled_containers`, treat that as
   host protection rather than an ordinary down container. Check OOM/restart evidence, then apply
   `70-docker-limits-critical.yml` and recreate only the Gateway after the resource cause is understood.
 

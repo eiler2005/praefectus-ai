@@ -134,7 +134,9 @@
   loop: "{{ expected_containers | default([]) }}"
   loop_control:
     label: "{{ item.name if item is mapping else item }}"
-  when: verify_check_containers | bool
+  when:
+    - verify_check_containers | bool
+    - (item.name if item is mapping else item) not in (disabled_containers | default([]))
 
 # === 7. Container healthchecks (for running containers) ===
 - name: "verify | 7) container healthchecks"
@@ -148,6 +150,7 @@
     label: "{{ hc_item.name if hc_item is mapping else hc_item }}"
   when:
     - verify_check_containers | bool
+    - (hc_item.name if hc_item is mapping else hc_item) not in (disabled_containers | default([]))
     - (hc_item.name if hc_item is mapping else hc_item) in vfy_running_containers
 
 # === 8. UFW status (optional; do not fail if not installed) ===

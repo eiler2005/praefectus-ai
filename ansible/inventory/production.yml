@@ -21,6 +21,8 @@ all:
                 - /opt/openclaw
                 - /opt/lightrag
                 - /opt/fluentloop-bot
+              disabled_containers:
+                - openclaw-openclaw-gateway-1
               expected_host_files:
                 - path: /etc/ssh/sshd_config.d/51-channel-m-reverse.conf
                   owner: router_configuration

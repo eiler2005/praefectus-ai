@@ -100,7 +100,7 @@ flowchart LR
 
 | Inventory host | Runtime role | Channel-specific guardrails |
 |---|---|---|
-| `vps-hetzner-prod` | Main app/routing VPS for `maxtg_bridge`, GhostRoute Console, OpenClaw/LightRAG and related app workloads | Channel M files/timers expected; restricted `18057/tcp` bridge listener expected; Channel D `4444/tcp` absent |
+| `vps-hetzner-prod` | Main app/routing VPS for `maxtg_bridge`, GhostRoute Console, LightRAG and related app workloads; OpenClaw Gateway intentionally disabled since 2026-09-06 | Channel M files/timers expected; restricted `18057/tcp` bridge listener expected; Channel D `4444/tcp` absent |
 | `vps-hostkey-hermes` | Separate workload host plus GhostRoute owned managed-egress candidate | `/opt/stealth`, `caddy`, `xray` expected after egress deploy; no Channel M reverse listener expected; Channel D `4444/tcp` absent |
 
 ## Installed Software Versions
