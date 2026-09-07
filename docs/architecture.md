@@ -66,8 +66,8 @@ The local monitor is the early-warning layer. It evaluates disk pressure,
 available RAM, swap usage, Docker daemon state, expected containers, high-risk
 container restart increases, Docker memory pressure, and recent kernel/cgroup
 OOM events. This is intentionally host-level: it can warn that
-`openclaw-openclaw-gateway-1` is pushing the VPS toward OOM without claiming
-ownership of OpenClaw application behavior. A host may explicitly list an
+`benka-hermes-lightrag-1` is pushing the Hermes host toward OOM without
+claiming ownership of My AI Office application behavior. A host may explicitly list an
 operator-disabled container in `disabled_containers`; the monitor then retains
 the inventory record without treating the stopped service as an outage.
 

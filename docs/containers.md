@@ -33,6 +33,43 @@ Criticality scale:
 
 ---
 
+## My AI Office on Hermes
+
+`my-ai-office` owns the `benka-hermes` Compose project under
+`/opt/benka-hermes`. The inventory below was reconciled by a read-only Docker
+inspection on 2026-09-07. Limits are application-owned Compose policy; they are
+recorded here so host monitoring can identify resource pressure, not so this
+repository can rewrite the application's Compose files.
+
+| Container | Service role | Criticality | Applied resource envelope |
+|---|---|---|---|
+| `benka-hermes-caddy-1` | Dashboard edge: TLS, mTLS and reverse proxy | CRITICAL | 128 MiB; read-only root filesystem |
+| `benka-hermes-gateway-1` | Hermes Gateway: sole Telegram poller, profile routing, tools and cron | CRITICAL | 2 GiB / 2 CPU / 256 PIDs; read-only root filesystem |
+| `benka-hermes-dashboard-1` | Browser dashboard process sharing the Gateway runtime boundary | HIGH | 2 GiB / 2 CPU / 256 PIDs; read-only root filesystem |
+| `benka-hermes-redis-1` | Integration bus: Streams, consumer groups, dedupe, receipts and reconciliation | CRITICAL | 768 MiB |
+| `benka-hermes-wiki-1` | Source-backed Markdown wiki ingest and query | HIGH | 2 GiB / 2 CPU / 256 PIDs; read-only root filesystem |
+| `benka-hermes-lightrag-1` | Graph and vector retrieval over approved knowledge roots | HIGH | 4 GiB / 2 CPU |
+| `benka-hermes-omniroute-1` | Provider routing for explicitly assigned workloads | MEDIUM | 1 GiB / 1 CPU |
+| `benka-hermes-worker-email-personal-1` | Personal mailbox polling, dedupe and delivery | HIGH | 2 GiB / 2 CPU / 256 PIDs; read-only root filesystem |
+| `benka-hermes-worker-email-work-1` | Work mailbox triage, digesting and delivery | HIGH | 2 GiB / 2 CPU / 256 PIDs; read-only root filesystem |
+| `benka-hermes-worker-telegram-1` | Telethon reading, digest rendering and confirmed delivery | HIGH | 2 GiB / 2 CPU / 256 PIDs; read-only root filesystem |
+| `benka-hermes-worker-signals-1` | Rule-based mail and Telegram signal monitoring | HIGH | 2 GiB / 2 CPU / 256 PIDs; read-only root filesystem |
+| `benka-hermes-worker-last30days-1` | Personal Feed and Platform Pulse research | MEDIUM | 2 GiB / 2 CPU / 256 PIDs; read-only root filesystem |
+| `benka-hermes-worker-maintenance-1` | Wiki lifecycle and LightRAG maintenance | MEDIUM | 2 GiB / 2 CPU / 256 PIDs; read-only root filesystem |
+
+The integration bus is the Redis container above; **there is no separate
+`integration-bus` container**. Hermes cron creates idempotent jobs in Redis,
+workers consume their own streams, and the app records confirmed delivery or a
+manual-reconciliation item before a job is acknowledged. `reddit-compass` is a
+separate neighbour on the same host, not a My AI Office dependency.
+
+Host actions are limited to monitoring, port auditing, encrypted backups of
+`/opt/benka-hermes/state` and `/opt/benka-hermes/private`, and approved
+host-level cleanup. Do not run `docker compose` commands, use `chown -R`, prune
+volumes, or inspect application secrets from PraefectusAI.
+
+---
+
 ## Known OpenClaw Runtime Limits
 
 These entries are host policy owned by PraefectusAI and persisted through

@@ -8,6 +8,23 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ## [Unreleased]
 
+### Added
+
+- The Hermes-host inventory now records My AI Office's `/opt/benka-hermes`
+  application directory, thirteen expected `benka-hermes-*` containers, and
+  encrypted restic coverage for its app-owned `state/` and `private/` paths.
+- Container and runtime maps now document the Hermes panel edge, Redis Streams
+  integration bus, dedicated workers, knowledge services, and the boundary
+  between My AI Office and neighbouring `reddit-compass`.
+- ADR-0008 records the host/application ownership boundary for the Hermes
+  workload.
+
+### Changed
+
+- The port map now records the authenticated Reddit Compass listener and My AI
+  Office's mTLS-protected panel listener, without publishing hostnames or
+  credentials.
+
 - **Docker boot-order early warning**: the host monitor now raises a sanitized
   current-boot WARN for Docker `systemd` ordering cycles; the new runbook
   separates unit-graph recovery from provider/UFW access checks and OOM

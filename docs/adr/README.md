@@ -13,6 +13,7 @@ This directory captures the *why* behind PraefectusAI's invariants. Each ADR fol
 | [0005](0005-override-files-as-host-policy-zone.md) | `docker-compose.override.local.yml` as the host-policy zone | Accepted |
 | [0006](0006-agents-md-contract-pattern.md) | `AGENTS.md` as a hard contract for LLM agents | Accepted |
 | [0007](0007-external-watchdog-and-resource-alerts.md) | External watchdog and early resource alerts | Accepted |
+| [0008](0008-my-ai-office-hermes-workload-boundary.md) | My AI Office as an app-owned Hermes workload | Accepted |
 
 ## When to add an ADR
 

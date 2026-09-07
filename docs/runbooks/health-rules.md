@@ -39,8 +39,10 @@ Architecture and rationale: [`architecture.md`](../architecture.md#monitoring-ar
 **Actions:**
 - WARN → log; check `docker stats --no-stream` for OOM candidates.
 - CRIT → log + Telegram alert + include top-5 processes by RSS in the alert.
-- `openclaw-openclaw-gateway-1` above 80% of its Docker memory limit is an early WARN because it has
-  previously OOMed without `maxtg_bridge` being the failing process.
+- On Hermes, sustained pressure from `benka-hermes-gateway-1` or
+  `benka-hermes-lightrag-1` is an early warning: capture host evidence and
+  coordinate with `my-ai-office`; do not alter its Compose limits or restart
+  the workload from this repository.
 
 ### Load average (5 min)
 
@@ -94,6 +96,10 @@ Architecture and rationale: [`architecture.md`](../architecture.md#monitoring-ar
   listed in `disabled_containers`, treat that as
   host protection rather than an ordinary down container. Check OOM/restart evidence, then apply
   `70-docker-limits-critical.yml` and recreate only the Gateway after the resource cause is understood.
+- An OOM or restart increase for a `benka-hermes-*` container is a host CRIT and
+  an application-owner escalation. Preserve the evidence, verify free memory
+  and disk, and let `my-ai-office` decide whether queue or runtime recovery is
+  safe.
 
 ### UFW
 
@@ -111,6 +117,9 @@ Architecture and rationale: [`architecture.md`](../architecture.md#monitoring-ar
 - CRIT → Telegram alert with process name; check limits in `docs/containers.md`.
 - Repeated OpenClaw Gateway OOMs must not be masked by switching it back to `restart=unless-stopped`;
   keep the bounded restart policy so the VPS remains available for `maxtg_bridge` and SSH.
+- For My AI Office, never treat a restarted worker as permission to replay its
+  Redis stream: delivery receipts and pending entries require application-level
+  reconciliation first.
 - OOM and a Docker boot ordering cycle are independent signals. Establish the
   unit-graph root cause before attributing a public data-plane incident to
   resource pressure.

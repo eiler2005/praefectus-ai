@@ -1,10 +1,10 @@
 # VPS Runtime Map
 
 This document is the operator-facing map of what PraefectusAI records and
-protects on the VPS side of the current GhostRoute/channel setup. It mirrors
-the router-side runtime map in `router_configuration`, but keeps the VPS
-ownership boundary explicit: PraefectusAI owns the host layer, while routing
-projects and application projects own their own reverse proxy, tunnel and app
+protects across the current VPS fleet: the GhostRoute/channel setup and the
+Hermes workload host that runs My AI Office. It keeps the ownership boundary
+explicit: PraefectusAI owns the host layer, while routing and application
+projects own their reverse proxy, tunnels, Compose configuration, state, and
 runtime.
 
 This is a sanitized expected-runtime view plus a read-only software baseline.
@@ -101,7 +101,48 @@ flowchart LR
 | Inventory host | Runtime role | Channel-specific guardrails |
 |---|---|---|
 | `vps-hetzner-prod` | Main app/routing VPS for `maxtg_bridge`, GhostRoute Console, LightRAG and related app workloads; OpenClaw Gateway intentionally disabled since 2026-09-06 | Channel M files/timers expected; restricted `18057/tcp` bridge listener expected; Channel D `4444/tcp` absent |
-| `vps-hostkey-hermes` | Separate workload host plus GhostRoute owned managed-egress candidate | `/opt/stealth`, `caddy`, `xray` expected after egress deploy; no Channel M reverse listener expected; Channel D `4444/tcp` absent |
+| `vps-hostkey-hermes` | Hermes workload host: My AI Office plus independent `reddit-compass`, `moex-futoi`, `cheap-intelligence`, and GhostRoute projects | `/opt/benka-hermes` holds the 13-service office; its Caddy publishes only the mTLS-protected panel listener on `8451`; no Channel M reverse listener expected; Channel D `4444/tcp` absent |
+
+## My AI Office on the Hermes host
+
+`my-ai-office` owns the `benka-hermes` Compose project in `/opt/benka-hermes`.
+It is an application workload, not a host service: PraefectusAI records its
+expected containers, checks that they are running, protects its host-level
+resource envelope, audits the listener, and backs up its designated state. It
+does not start, stop, recreate, reconfigure, or inspect the application's
+private manifests, credentials, queues, or volumes outside the approved backup
+path.
+
+```text
+Telegram / Hermes CLI / authenticated browser
+                 │
+                 ▼
+benka-hermes-caddy-1  (8451, TLS + mTLS)
+                 │
+                 ▼
+gateway + dashboard  ──► domain profiles and native Benka tools
+                 │
+Hermes cron ──► Redis Streams  ──► six dedicated workers
+                 │                       │
+                 ├──► wiki / LightRAG / private archive
+                 └──► allowlisted Telegram delivery + receipts
+```
+
+The integration bus is **`benka-hermes-redis-1`**. There is no separate
+`integration-bus` container: Redis Streams holds job queues, consumer groups,
+deduplication keys, delivery receipts, and reconciliation records. The six
+workers serve personal mail, work mail, Telegram Digest, Signals, Last30Days,
+and wiki/LightRAG maintenance. `reddit-compass` is a neighbouring Compose
+project; it is not the office's Redis bus and is not the Last30Days Reddit
+source adapter.
+
+| Office area | Expected containers | VPS-management boundary |
+|---|---|---|
+| Panel edge | `benka-hermes-caddy-1` | One host-published listener on `8451`; Caddy's TLS/mTLS and dashboard authentication remain app-owned. |
+| Agent access | `benka-hermes-gateway-1`, `benka-hermes-dashboard-1` | Gateway is the sole production Telegram polling owner; dashboard shares its agent runtime boundary. |
+| Execution | `benka-hermes-redis-1` and six `benka-hermes-worker-*` containers | Record health and restart evidence. Do not replay streams or restart workers automatically. |
+| Knowledge and routing | `benka-hermes-wiki-1`, `benka-hermes-lightrag-1`, `benka-hermes-omniroute-1` | Keep the application state intact; changes to embeddings, models, indexes, or provider configuration belong to `my-ai-office`. |
+| Durable state | `/opt/benka-hermes/state`, `/opt/benka-hermes/private` | Included in encrypted restic backups. Never read, copy to Git, recursively `chown`, or prune these paths. |
 
 ## Installed Software Versions
 

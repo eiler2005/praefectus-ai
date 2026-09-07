@@ -60,15 +60,20 @@ all:
                   owner: router_configuration / maxtg_bridge
                   expected_scope: docker_bridge
             vps-hostkey-hermes:
-              vps_display_name: pulsartrlab-hermes-hostkey
+              vps_display_name: hermes-ai-office-host
               expected_app_dirs:
                 - /opt/stealth
                 - /opt/moex-futoi
                 - /opt/cheap-intelligence
                 - /opt/reddit-compass
+                - /opt/benka-hermes
               host_backup_paths:
                 - /var/lib/docker/volumes/cheap-intelligence_digest_data/_data
                 - /var/lib/docker/volumes/cheap-intelligence_digest_postgres/_data
+                # Application-owned secrets and durable state. restic encrypts
+                # these inputs; this repository never reads or edits them.
+                - /opt/benka-hermes/state
+                - /opt/benka-hermes/private
               expected_containers:
                 - name: caddy
                   owner: router_configuration
@@ -96,6 +101,45 @@ all:
                   healthcheck: docker
                 - name: ladder
                   owner: reddit_compass
+                  healthcheck: docker
+                - name: benka-hermes-caddy-1
+                  owner: my-ai-office
+                  healthcheck: docker
+                - name: benka-hermes-gateway-1
+                  owner: my-ai-office
+                  healthcheck: docker
+                - name: benka-hermes-dashboard-1
+                  owner: my-ai-office
+                  healthcheck: docker
+                - name: benka-hermes-redis-1
+                  owner: my-ai-office
+                  healthcheck: docker
+                - name: benka-hermes-wiki-1
+                  owner: my-ai-office
+                  healthcheck: docker
+                - name: benka-hermes-lightrag-1
+                  owner: my-ai-office
+                  healthcheck: docker
+                - name: benka-hermes-omniroute-1
+                  owner: my-ai-office
+                  healthcheck: docker
+                - name: benka-hermes-worker-email-personal-1
+                  owner: my-ai-office
+                  healthcheck: docker
+                - name: benka-hermes-worker-email-work-1
+                  owner: my-ai-office
+                  healthcheck: docker
+                - name: benka-hermes-worker-telegram-1
+                  owner: my-ai-office
+                  healthcheck: docker
+                - name: benka-hermes-worker-signals-1
+                  owner: my-ai-office
+                  healthcheck: docker
+                - name: benka-hermes-worker-last30days-1
+                  owner: my-ai-office
+                  healthcheck: docker
+                - name: benka-hermes-worker-maintenance-1
+                  owner: my-ai-office
                   healthcheck: docker
               expected_systemd_timers:
                 - name: vps-monitor.timer

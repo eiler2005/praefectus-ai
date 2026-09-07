@@ -21,6 +21,8 @@ Ports intentionally exposed to the public internet.
 | 22000 | TCP | Syncthing sync | system (syncthing) | PraefectusAI | TCP connect |
 | 22000 | UDP | Syncthing sync (QUIC) | system (syncthing) | PraefectusAI | UDP connect |
 | 21027 | UDP | Syncthing discovery | system (syncthing) | PraefectusAI | UDP connect |
+| 8450 | TCP | Reddit Compass authenticated web surface | `rc-caddy` | `reddit_compass` | HTTPS response through the app-owned Caddy |
+| 8451 | TCP | My AI Office Hermes dashboard | `benka-hermes-caddy-1` | `my-ai-office` | TLS handshake; access additionally requires a trusted client certificate and dashboard authentication |
 
 ## Restricted ports (specific source networks only)
 
@@ -65,6 +67,7 @@ Replace `<app port>` rows with your own services.
 |---|---|---|---|
 | redis (example) | application_default | 6379 | available only inside the network |
 | maxtg bridge | deploy_default | bridge container reaches host gateway on 18057 | reverse Channel M maps proxy host to the Docker bridge gateway with `extra_hosts` |
+| My AI Office | benka-hermes internal network | Redis `6379`, LightRAG `9621`, OmniRoute `20128`, Gateway dashboard `9119` | Docker-only service ports. Caddy on `8451` is the sole host-published listener for this Compose project. |
 
 ## External router-owned ports (not VPS listeners)
 

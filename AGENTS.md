@@ -12,7 +12,11 @@ Shared rules for any agent (Codex, Claude Code, Cursor, others) working in this 
 - **Memory** — structured reports (`reports/health/*.json`) + manual journal (`docs/journal/`)
 - **Guardrails** — Ansible Vault + secret-scan + ownership matrix + read-only by default
 
-Target host model: any Linux VPS with SSH + Docker. Reference deployment is a single Hetzner CX23 (Ubuntu 24.04, 4 GB RAM, 2 vCPU, 40 GB disk, `deploy@22`), but patterns scale to small fleets without structural change.
+Target host model: any Linux VPS with SSH + Docker. The reference fleet now has a legacy small
+Hetzner host and a larger Hermes workload host (8 vCPU, about 16 GiB RAM). The latter runs My AI
+Office alongside independent Compose projects. Host-specific ownership and expected-runtime details
+live in [`docs/ownership-matrix.md`](docs/ownership-matrix.md) and
+[`docs/vps-runtime-map.md`](docs/vps-runtime-map.md); endpoints and credentials remain in Vault.
 
 ### What this repo owns (host layer)
 
