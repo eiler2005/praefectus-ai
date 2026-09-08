@@ -45,11 +45,17 @@ all:
                 - path: /etc/systemd/system/channel-m-reverse-listener-watchdog.timer
                   owner: router_configuration
                   purpose: Channel M stale listener watchdog timer
+              expected_containers:
+                - name: deploy-bridge-1
+                  owner: maxtg_bridge
+                  healthcheck: docker
               expected_systemd_timers:
                 - name: vps-monitor.timer
                   owner: vps_management
                 - name: vps-external-watchdog.timer
                   owner: vps_management
+                - name: maxtg-watchdog-push.timer
+                  owner: maxtg_bridge
                 - name: channel-m-reverse-firewall.timer
                   owner: router_configuration
                 - name: channel-m-reverse-listener-watchdog.timer
@@ -62,6 +68,7 @@ all:
             vps-hostkey-hermes:
               vps_display_name: hermes-ai-office-host
               expected_app_dirs:
+                - /opt/maxtg-watchdog
                 - /opt/stealth
                 - /opt/moex-futoi
                 - /opt/cheap-intelligence
@@ -75,6 +82,9 @@ all:
                 - /opt/benka-hermes/state
                 - /opt/benka-hermes/private
               expected_containers:
+                - name: maxtg-watchdog
+                  owner: maxtg_bridge
+                  healthcheck: docker
                 - name: caddy
                   owner: router_configuration
                   healthcheck: docker

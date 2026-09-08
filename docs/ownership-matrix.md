@@ -34,6 +34,7 @@ Each application running on the VPS is an "owner" with its own deploy pipeline. 
 |---|---|---|---|---|
 | `/opt/<app-1>/` | `<app-1-repo>` | bridge service, sqlite, sessions | application's own ansible | `docker-compose.override.local.yml` for `mem_limit` |
 | `/opt/maxtg-bridge/` | `maxtg_bridge` | MAX -> Telegram bridge, SQLite state, MAX session, compose config | `maxtg_bridge` Ansible | host-level limits only; do not edit app compose/env directly |
+| `/opt/maxtg-watchdog/` | `maxtg_bridge` | External watchdog observing the production bridge host; state volume, pinned SSH key | `deploy/external-watchdog/deploy.sh` (application owner) | host-level limits only; never edit the app compose/env directly |
 | `/opt/<app-2>/` | `<app-2-repo>` | gateway, workspace, config | application's own deploy script | `mem_limit` |
 | `/opt/fluentloop-bot/` | `fluentloop_bot` | Telegram learning bot, SQLite state, lesson/material data, compose config | application's own deploy script | host-level monitoring only; do not edit app compose/env directly |
 | `/opt/<app-3>/` | `<app-3-repo>` | KG + vector store (high OOM risk) | application's own deploy script | `mem_limit` (critical) |

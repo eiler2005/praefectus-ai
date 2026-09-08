@@ -125,3 +125,21 @@ If UFW has locked you out of SSH:
 1. Open the provider's web console (e.g. Hetzner Cloud Console, AWS EC2 Console, DigitalOcean web terminal).
 2. `sudo ufw disable` → SSH access is restored.
 3. Re-add the rule that was missing, then re-enable: `sudo ufw allow 22/tcp && sudo ufw enable`.
+
+---
+
+## maxtg-bridge external watchdog
+
+Two rules connect the production bridge host with its observer. They are
+independent controls and must exist in **both** UFW and the provider firewall.
+
+| Host | Direction | Rule | Purpose |
+|---|---|---|---|
+| production | inbound | TCP 22 from observer `/32` | SSH probe (pinned to a read-only forced command) |
+| production | outbound | TCP 18151 to observer `/32` | push dead-man's switch |
+| observer | inbound | TCP 18151 from production `/32` | push receiver |
+
+The production host's cloud firewall restricts **outbound** traffic as well, so
+the outbound rule is easy to miss: UFW reports `allow (outgoing)` while packets
+leave the interface and are dropped upstream. Symptom — timeouts to any port
+other than 443, including unrelated hosts.

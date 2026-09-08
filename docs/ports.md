@@ -32,6 +32,7 @@ Ports that must be reachable only from a defined source network (Docker bridge, 
 |---|---|---|---|---|---|
 | 15353 | TCP+UDP | Internal DNS resolver (Unbound) | 172.22.0.0/16 (Docker bridge) | application owner | Optional; UFW rule remains for diagnostics |
 | 18057 | TCP | Channel M reverse MAX egress listener | compose Docker bridge only | router_configuration / maxtg_bridge | Internal SSH remote-forward endpoint; guarded by firewall + stale-listener watchdog; not public UFW/cloud-firewall exposure |
+| 18151 | TCP | maxtg-bridge external watchdog push receiver | production host `/32` only | `maxtg_bridge` | HMAC-signed status snapshots; UFW on the observer host plus a matching outbound rule in the production host's cloud firewall |
 
 ## Private ports (`127.0.0.1` — internal only)
 
@@ -52,6 +53,7 @@ Ports bound to the loopback interface only. Reachable from the VPS itself or via
 | 8095 | TCP | Wiki import app | `wiki-import` | application owner | app health/API |
 | 8443 | TCP | Xray local backend | `xray` | routing project | local reverse-proxy/backend check |
 | 8444 | TCP | Cheap Intelligence inner TLS | `ci-caddy-inner` | `AiNativeBook_Draft_26/services/digest-service` | exact-SNI upstream from outer Caddy; container health on internal `:8081` |
+| 18140 | TCP | maxtg-bridge read-only status API | `deploy-bridge-1` | `maxtg_bridge` | `GET /healthz`; `GET /status` needs a bearer token. Reached from outside only through the watchdog's SSH channel |
 | 18081 | TCP | Channel B/XHTTP local backend | `xray-xhttp` | routing project | local backend check |
 | 18789 | TCP | OpenClaw gateway | `openclaw-openclaw-gateway-1` | application owner | intentionally disabled on `vps-hetzner-prod` since 2026-09-06 |
 | 18790 | TCP | OpenClaw gateway companion port | `openclaw-openclaw-gateway-1` | application owner | intentionally disabled on `vps-hetzner-prod` since 2026-09-06 |

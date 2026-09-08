@@ -9,6 +9,7 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 ## [Unreleased]
 
 ### Added
+- Registered the `maxtg_bridge` external watchdog: `maxtg-watchdog` container and `/opt/maxtg-watchdog` on the Hermes host, `maxtg-watchdog-push.timer` on the production host, ports `18140` (private status API) and `18151` (restricted push receiver), and the firewall rules that connect the two hosts. Also added the previously unlisted `deploy-bridge-1` container to the production host's expected set.
 
 - The Hermes-host inventory now records My AI Office's `/opt/benka-hermes`
   application directory, thirteen expected `benka-hermes-*` containers, and

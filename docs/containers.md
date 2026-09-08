@@ -14,6 +14,7 @@ Inventory of every Docker container running on the VPS. Update when adding or re
 | `openclaw-openclaw-gateway-1` | DISABLED | 1224m / 0.90 CPU / 256 pids / restart `on-failure:5` / logs `10m x3` | Intentionally disabled on `vps-hetzner-prod` by operator on 2026-09-06 after repeated resource pressure; data is retained and the monitor excludes it |
 | `omniroute` | CRITICAL | 512m / 0.25 CPU / 128 pids | LLM route proxy; limits from `70-docker-limits-critical.yml` |
 | `lightrag-lightrag-1` | CRITICAL | 2304m / 2816m swap / 0.45 CPU / 128 pids | Knowledge graph service; 2304m is intentional because lower caps caused cold-start OOM on the current graph |
+| `maxtg-watchdog` | HIGH | 128m / 128 pids / logs `10m x3` | External watchdog on Hermes observing the production bridge host; read-only SSH probe, push receiver on 18151, Telegram alerts. Owned by `maxtg_bridge`, deployed from that repo |
 | `ci-digest` | HIGH | 256m / 0.50 CPU / 128 pids | Digest subscription API on Hermes; app-owned limits and persistent subscriber volume |
 | `ci-digest-postgres` | HIGH | 384m / 0.50 CPU / 128 pids | Private PostgreSQL source of truth for encrypted contacts, consent evidence and delivery queue |
 | `ci-caddy-inner` | HIGH | 128m / 0.25 CPU / 64 pids | Inner TLS terminator for the digest exact-SNI route; loopback-only host bind |
