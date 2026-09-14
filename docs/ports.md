@@ -40,6 +40,7 @@ Ports bound to the loopback interface only. Reachable from the VPS itself or via
 
 | Port | Protocol | Service | Container | Owner | Healthcheck |
 |---|---|---|---|---|---|
+| 8100 | TCP | Career Copilot private dashboard | `career-copilot-dashboard` | `career-copilot` | `GET http://127.0.0.1:8100/healthz`; SSH tunnel via local port 18100 |
 | 53 | TCP | systemd-resolved local DNS stub | system | PraefectusAI | local resolver check |
 | 2019 | TCP | reverse proxy admin endpoint | system reverse proxy | application owner | local admin only |
 | 3000 | TCP | GhostRoute Console | `ghostroute-console` | application owner | app health/API |

@@ -1,0 +1,25 @@
+---
+# Add one application-owned path to the existing Hermes backup command.
+# This deliberately avoids re-rendering /usr/local/bin/vps-backup.sh: the
+# deployed script has locally retained retry/logging behavior that must stay
+# byte-for-byte unchanged outside the backup input line.
+- name: "31 | Add Career Copilot workspace to Hermes backup"
+  hosts: vps-hostkey-hermes
+  become: true
+  gather_facts: false
+  vars:
+    backup_script: /usr/local/bin/vps-backup.sh
+    career_copilot_backup_path: /opt/career-copilot/workspace
+
+  tasks:
+    - name: "31 | backup | add Career Copilot workspace path"
+      ansible.builtin.lineinfile:
+        path: "{{ backup_script }}"
+        regexp: '^(?!.*?/opt/career-copilot/workspace)(\s*restic\s+backup\s+.*?)(\s+--tag\b.*)$'
+        line: '\1 {{ career_copilot_backup_path }}\2'
+        backrefs: true
+        owner: root
+        group: root
+        mode: '0700'
+        backup: true
+        validate: '/usr/bin/bash -n %s'

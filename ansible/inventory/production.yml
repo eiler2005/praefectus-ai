@@ -74,6 +74,7 @@ all:
                 - /opt/cheap-intelligence
                 - /opt/reddit-compass
                 - /opt/benka-hermes
+                - /opt/career-copilot
               host_backup_paths:
                 - /var/lib/docker/volumes/cheap-intelligence_digest_data/_data
                 - /var/lib/docker/volumes/cheap-intelligence_digest_postgres/_data
@@ -81,6 +82,7 @@ all:
                 # these inputs; this repository never reads or edits them.
                 - /opt/benka-hermes/state
                 - /opt/benka-hermes/private
+                - /opt/career-copilot/workspace
               expected_containers:
                 - name: maxtg-watchdog
                   owner: maxtg_bridge
@@ -151,6 +153,9 @@ all:
                 - name: benka-hermes-worker-maintenance-1
                   owner: my-ai-office
                   healthcheck: docker
+                - name: career-copilot-dashboard
+                  owner: career-copilot
+                  healthcheck: http://127.0.0.1:8100/healthz
               expected_systemd_timers:
                 - name: vps-monitor.timer
                   owner: vps_management

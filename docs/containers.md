@@ -69,6 +69,20 @@ Host actions are limited to monitoring, port auditing, encrypted backups of
 host-level cleanup. Do not run `docker compose` commands, use `chown -R`, prune
 volumes, or inspect application secrets from PraefectusAI.
 
+## Career Copilot dashboard on Hermes
+`career-copilot` owns the deployed Compose project under `/opt/career-copilot`.
+The deployment was verified on 2026-09-14 after the application owner confirmed
+the container and healthcheck. The host layer monitors the service, audits its
+loopback-only listener, and backs up `/opt/career-copilot/workspace`; it does not
+edit the application's Compose, environment, or private data.
+
+| Container | Service role | Criticality | Applied resource envelope |
+|---|---|---|---|
+| `career-copilot-dashboard` | Private Career Copilot dashboard | HIGH | 512 MiB / 1 CPU; application Compose confirmed |
+
+The expected host binding is `127.0.0.1:8100` to container port `8100`.
+Health is `GET http://127.0.0.1:8100/healthz`; access is through an SSH tunnel.
+
 ---
 
 ## Known OpenClaw Runtime Limits
