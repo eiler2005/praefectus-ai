@@ -81,6 +81,11 @@ edit the application's Compose, environment, or private data.
 | `career-copilot-dashboard` | Private Career Copilot dashboard | HIGH | 512 MiB / 1 CPU; application Compose confirmed |
 | `career-copilot-gateway` | Authenticating HTTPS gateway (Caddy, TLS + Basic Auth) | HIGH | 128 MiB / 0.5 CPU; read-only rootfs, `cap_drop: ALL` + `NET_BIND_SERVICE` |
 
+The dashboard also mounts the named volume `career-copilot_dashboard_state` at
+`/data/state` for on-demand availability-check results only; they are imported
+into the private journal by the owner's publish script, so the volume is not a
+backup source. The workspace mount remains read-only.
+
 The expected host bindings are `127.0.0.1:8100` (dashboard) and `127.0.0.1:8445`
 (gateway TLS). Dashboard health is `GET http://127.0.0.1:8100/healthz`; the
 gateway uses its Docker healthcheck. Operator access remains available through an
