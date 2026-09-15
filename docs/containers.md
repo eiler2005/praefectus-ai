@@ -79,9 +79,17 @@ edit the application's Compose, environment, or private data.
 | Container | Service role | Criticality | Applied resource envelope |
 |---|---|---|---|
 | `career-copilot-dashboard` | Private Career Copilot dashboard | HIGH | 512 MiB / 1 CPU; application Compose confirmed |
+| `career-copilot-gateway` | Authenticating HTTPS gateway (Caddy, TLS + Basic Auth) | HIGH | 128 MiB / 0.5 CPU; read-only rootfs, `cap_drop: ALL` + `NET_BIND_SERVICE` |
 
-The expected host binding is `127.0.0.1:8100` to container port `8100`.
-Health is `GET http://127.0.0.1:8100/healthz`; access is through an SSH tunnel.
+The expected host bindings are `127.0.0.1:8100` (dashboard) and `127.0.0.1:8445`
+(gateway TLS). Dashboard health is `GET http://127.0.0.1:8100/healthz`; the
+gateway uses its Docker healthcheck. Operator access remains available through an
+SSH tunnel. Since 2026-09-15 browsers can also reach the dashboard over standard
+HTTPS: the GhostRoute outer Caddy (`router_configuration` playbook
+`13-hermes-app-web-route.yml`) forwards one exact SNI hostname, unterminated, to
+`127.0.0.1:8445`. The hostname lives only in the application `.env`
+(`CC_PUBLIC_HOST`); credentials are an application secret. No UFW or cloud
+firewall change was needed because `443/tcp` was already public.
 
 ---
 

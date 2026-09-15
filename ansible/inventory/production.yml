@@ -156,6 +156,9 @@ all:
                 - name: career-copilot-dashboard
                   owner: career-copilot
                   healthcheck: http://127.0.0.1:8100/healthz
+                - name: career-copilot-gateway
+                  owner: career-copilot
+                  healthcheck: docker
               expected_systemd_timers:
                 - name: vps-monitor.timer
                   owner: vps_management

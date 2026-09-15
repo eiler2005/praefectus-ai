@@ -16,7 +16,7 @@ Ports intentionally exposed to the public internet.
 |---|---|---|---|---|---|
 | 22 | TCP | sshd | system (sshd) | PraefectusAI | `nc -z <host> 22` |
 | 80 | TCP | HTTP → HTTPS redirect, ACME challenge | system (caddy / nginx) | application owner | `curl -I http://<host>/` |
-| 443 | TCP | HTTPS + SNI-routed routing surfaces; Hermes owned egress uses Caddy layer4 | system or container Caddy | application owner / routing project | TLS handshake |
+| 443 | TCP | HTTPS + SNI-routed routing surfaces; Hermes owned egress uses Caddy layer4 with exact-SNI app routes (Cheap Intelligence digest → `8444`, Career Copilot → `8445`) | system or container Caddy | application owner / routing project | TLS handshake |
 | 2087 | TCP | Admin console dedicated HTTPS listener | system reverse proxy | application owner / routing project | TLS handshake |
 | 22000 | TCP | Syncthing sync | system (syncthing) | PraefectusAI | TCP connect |
 | 22000 | UDP | Syncthing sync (QUIC) | system (syncthing) | PraefectusAI | UDP connect |
@@ -41,6 +41,7 @@ Ports bound to the loopback interface only. Reachable from the VPS itself or via
 | Port | Protocol | Service | Container | Owner | Healthcheck |
 |---|---|---|---|---|---|
 | 8100 | TCP | Career Copilot private dashboard | `career-copilot-dashboard` | `career-copilot` | `GET http://127.0.0.1:8100/healthz`; SSH tunnel via local port 18100 |
+| 8445 | TCP | Career Copilot HTTPS gateway (TLS + Basic Auth) | `career-copilot-gateway` | `career-copilot` | exact-SNI upstream from GhostRoute outer Caddy on `:443`; Docker healthcheck on internal `:8081` |
 | 53 | TCP | systemd-resolved local DNS stub | system | PraefectusAI | local resolver check |
 | 2019 | TCP | reverse proxy admin endpoint | system reverse proxy | application owner | local admin only |
 | 3000 | TCP | GhostRoute Console | `ghostroute-console` | application owner | app health/API |

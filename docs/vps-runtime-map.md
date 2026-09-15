@@ -143,7 +143,8 @@ source adapter.
 | Execution | `benka-hermes-redis-1` and six `benka-hermes-worker-*` containers | Record health and restart evidence. Do not replay streams or restart workers automatically. |
 | Knowledge and routing | `benka-hermes-wiki-1`, `benka-hermes-lightrag-1`, `benka-hermes-omniroute-1` | Keep the application state intact; changes to embeddings, models, indexes, or provider configuration belong to `my-ai-office`. |
 | Durable state | `/opt/benka-hermes/state`, `/opt/benka-hermes/private` | Included in encrypted restic backups. Never read, copy to Git, recursively `chown`, or prune these paths. |
-| Career Copilot dashboard | `/opt/career-copilot` on `vps-hostkey-hermes` | `career-copilot` | Application-owned Compose workflow (verified 2026-09-14); host loopback `127.0.0.1:8100` maps to container port `8100`; durable `/workspace` is included in encrypted restic backups |
+| Career Copilot dashboard | `/opt/career-copilot` on `vps-hostkey-hermes` | `career-copilot` | Application-owned Compose workflow (verified 2026-09-14); host loopback `127.0.0.1:8100` maps to container port `8100`; the read-only workspace mount `/data/workspace` comes from `/opt/career-copilot/workspace`, which is included in encrypted restic backups |
+| Career Copilot gateway | `career-copilot-gateway` on `vps-hostkey-hermes` | `career-copilot` | Caddy TLS + Basic Auth on loopback `127.0.0.1:8445`; public only through the GhostRoute exact-SNI route on `443/tcp` (added 2026-09-15); `/healthz` is unauthenticated, everything else requires credentials |
 
 ## Installed Software Versions
 
@@ -214,7 +215,9 @@ flowchart TB
   restricted --> p15353[15353/tcp+udp optional internal DNS]
 
   loopback --> localApps[app APIs, reverse-proxy admin, Xray backends]
-loopback --> careerCopilot[Career Copilot dashboard<br/>127.0.0.1:8100 via SSH tunnel]
+  loopback --> careerCopilot[Career Copilot dashboard<br/>127.0.0.1:8100 via SSH tunnel]
+  p443 -->|exact SNI| careerGateway[Career Copilot gateway<br/>127.0.0.1:8445 TLS + Basic Auth]
+  careerGateway --> careerCopilot
   absent --> p4444[4444/tcp Channel D router-owned listener]
 ```
 
