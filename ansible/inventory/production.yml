@@ -15,14 +15,24 @@ all:
         vps:
           hosts:
             vps-hetzner-prod:
-              vps_display_name: maxtg-router-openclaw-cx23
+              vps_display_name: hetzner-routing-app-host
               expected_app_dirs:
                 - /opt/maxtg-bridge
-                - /opt/openclaw
-                - /opt/lightrag
                 - /opt/fluentloop-bot
+                - /opt/ghostroute-console
+                - /opt/stealth
+              # Retired runtimes; archives and recovery notes are recorded in
+              # docs/journal/2026-11.md. Never alert on or restart these.
               disabled_containers:
                 - openclaw-openclaw-gateway-1
+                - omniroute
+                - lightrag-lightrag-1
+                - integration-bus-redis
+                - wiki-import
+                - telethon-digest-cron-bridge
+                - agentmail-email-bridge
+                - agentmail-work-email-bridge
+                - signals-bridge
               expected_host_files:
                 - path: /etc/ssh/sshd_config.d/51-channel-m-reverse.conf
                   owner: router_configuration
@@ -48,6 +58,18 @@ all:
               expected_containers:
                 - name: deploy-bridge-1
                   owner: maxtg_bridge
+                  healthcheck: docker
+                - name: fluentloop-bot
+                  owner: fluentloop_bot
+                  healthcheck: docker
+                - name: ghostroute-console
+                  owner: router_configuration
+                  healthcheck: docker
+                - name: xray
+                  owner: router_configuration
+                  healthcheck: docker
+                - name: xray-xhttp
+                  owner: router_configuration
                   healthcheck: docker
               expected_systemd_timers:
                 - name: vps-monitor.timer
@@ -80,9 +102,11 @@ all:
                 - /var/lib/docker/volumes/cheap-intelligence_digest_postgres/_data
                 # Application-owned secrets and durable state. restic encrypts
                 # these inputs; this repository never reads or edits them.
-                - /opt/benka-hermes/state
-                - /opt/benka-hermes/private
+                # Actual production bind-mount root; includes data/, runtime/
+                # and private/. The old top-level state/private paths do not exist.
+                - /opt/benka-hermes/production/cutover-20260906/state
                 - /opt/career-copilot/workspace
+                - /var/lib/docker/volumes/career-copilot_dashboard_state/_data
               expected_containers:
                 - name: maxtg-watchdog
                   owner: maxtg_bridge

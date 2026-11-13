@@ -12,6 +12,37 @@ Real public IPs, SSH users, SSH ports, provider firewall values, tokens and app
 secrets stay in Ansible Vault, application-owned secrets, or gitignored
 reports.
 
+## Reconciliation — 2026-11-13
+
+The active contract is five app/routing containers on `vps-hetzner-prod` and
+25 on `vps-hostkey-hermes`. Hermes also runs a separate migration BuildKit
+builder; MOEX jobs and the Reddit collector can run temporarily and are not
+permanent service expectations. All persistent containers were running during
+the read-only snapshot. Post-cleanup host gates passed at 62% disk on Hetzner
+and 61% on Hermes; see [the operations journal](journal/2026-11.md).
+
+Repository configuration and installed scripts are not yet identical:
+
+- Inventory now records all five Hetzner containers and excludes the retired
+  OpenClaw-era services. The installed Hetzner poller still expects the old
+  services; the Hermes poller expects only five of the 25 app containers.
+- Infrastructure Telegram delivery is not configured on either host. The
+  Hermes monitor also retains a current-boot Docker ordering-cycle warning.
+- The installed Hermes backup script covers the two digest volumes and Career
+  Copilot workspace. Inventory now selects the actual office state root and
+  the Career Copilot durable request/check volume too; these additions require
+  a reviewed backup deployment and restore verification before claiming coverage.
+- `99-verify.yml` checks host guardrails but currently does not assert the
+  full expected-container set or Docker health. A green gate is not proof of
+  application business behavior or complete backup coverage.
+
+The approved cleanup removed archived legacy Hetzner agent/memory/LightRAG
+data and the inactive OmniRoute volume, and archived obsolete Hermes candidate
+builds and workspace refresh copies. Active office state, current app releases,
+current workspace and `workspace-prev` were retained. Local archives are not
+cloud backup snapshots. Legacy resource playbooks `60` and `70` require explicit
+`legacy_workloads_enabled=true` after an owner-approved restore and audit.
+
 For machine-readable guardrails, see
 [`ansible/inventory/production.yml`](/ansible/inventory/production.yml),
 [`docs/ports.md`](/docs/ports.md) and
@@ -100,15 +131,16 @@ flowchart LR
 
 | Inventory host | Runtime role | Channel-specific guardrails |
 |---|---|---|
-| `vps-hetzner-prod` | Main app/routing VPS for `maxtg_bridge`, GhostRoute Console, LightRAG and related app workloads; OpenClaw Gateway intentionally disabled since 2026-09-06 | Channel M files/timers expected; restricted `18057/tcp` bridge listener expected; Channel D `4444/tcp` absent |
-| `vps-hostkey-hermes` | Hermes workload host: My AI Office plus independent `reddit-compass`, `moex-futoi`, `cheap-intelligence`, and GhostRoute projects | `/opt/benka-hermes` holds the 13-service office; its Caddy publishes only the mTLS-protected panel listener on `8451`; no Channel M reverse listener expected; Channel D `4444/tcp` absent |
+| `vps-hetzner-prod` | `maxtg_bridge`, Fluentloop, GhostRoute Console, Xray and XHTTP; OpenClaw-era Gateway/OmniRoute/LightRAG and bridge services are retired | Channel M files/timers and restricted `18057/tcp` listener expected; `4444/tcp` absent; no legacy app listeners expected |
+| `vps-hostkey-hermes` | My AI Office plus independent `reddit-compass`, `moex-futoi`, `cheap-intelligence`, Career Copilot, maxtg watchdog and GhostRoute projects | 13-service office under `/opt/benka-hermes`; panel on `8451`; Career Copilot on loopback `8100`/`8445`; no Channel M listener; `4444/tcp` absent |
 
 ## My AI Office on the Hermes host
 
 `my-ai-office` owns the `benka-hermes` Compose project in `/opt/benka-hermes`.
 It is an application workload, not a host service: PraefectusAI records its
 expected containers, checks that they are running, protects its host-level
-resource envelope, audits the listener, and backs up its designated state. It
+resource envelope, audits the listener, and configures the designated backup
+scope; the current coverage gap is recorded below. It
 does not start, stop, recreate, reconfigure, or inspect the application's
 private manifests, credentials, queues, or volumes outside the approved backup
 path.
@@ -142,13 +174,25 @@ source adapter.
 | Agent access | `benka-hermes-gateway-1`, `benka-hermes-dashboard-1` | Gateway is the sole production Telegram polling owner; dashboard shares its agent runtime boundary. |
 | Execution | `benka-hermes-redis-1` and six `benka-hermes-worker-*` containers | Record health and restart evidence. Do not replay streams or restart workers automatically. |
 | Knowledge and routing | `benka-hermes-wiki-1`, `benka-hermes-lightrag-1`, `benka-hermes-omniroute-1` | Keep the application state intact; changes to embeddings, models, indexes, or provider configuration belong to `my-ai-office`. |
-| Durable state | `/opt/benka-hermes/state`, `/opt/benka-hermes/private` | Included in encrypted restic backups. Never read, copy to Git, recursively `chown`, or prune these paths. |
-| Career Copilot dashboard | `/opt/career-copilot` on `vps-hostkey-hermes` | `career-copilot` | Application-owned Compose workflow (verified 2026-09-14); host loopback `127.0.0.1:8100` maps to container port `8100`; the read-only workspace mount `/data/workspace` comes from `/opt/career-copilot/workspace`, which is included in encrypted restic backups |
-| Career Copilot gateway | `career-copilot-gateway` on `vps-hostkey-hermes` | `career-copilot` | Caddy TLS + Basic Auth on loopback `127.0.0.1:8445`; public only through the GhostRoute exact-SNI route on `443/tcp` (added 2026-09-15); `/healthz` is unauthenticated, everything else requires credentials |
+| Durable state | `/opt/benka-hermes/production/cutover-20260906/state` | Actual bind-mount root, including private data. Desired encrypted backup source; absent from the installed backup script. Do not read, copy to Git, recursively `chown` or prune application state. |
+| Career Copilot dashboard | `career-copilot-dashboard` in `/opt/career-copilot` | Application-owned; read-only workspace from `/opt/career-copilot/workspace`, loopback `8100`. The workspace is backed up; the separate durable request/check volume is configured but awaiting backup deployment. |
+| Career Copilot gateway | `career-copilot-gateway` | Application-owned Caddy TLS + Basic Auth on loopback `8445`; public through the routing-owned exact-SNI route on `443`. Docker health and current bindings were checked on 2026-11-13. |
 
 ## Installed Software Versions
 
-Last read-only snapshot: 2026-06-13 from `vps-hetzner-prod`.
+Read-only fleet reconciliation on 2026-11-13:
+
+| Component | `vps-hetzner-prod` | `vps-hostkey-hermes` |
+|---|---|---|
+| OS | Ubuntu 24.04.4 LTS | Ubuntu 22.04.5 LTS |
+| Running kernel | `6.8.0-138-generic` | `5.15.0-186-generic` |
+| Docker Engine | `29.6.0` | `29.6.0` |
+| Docker Compose | `v5.1.4` | `v5.1.4` |
+
+### Historical package baseline — 2026-06-13
+
+The table below is the older `vps-hetzner-prod` package snapshot, not current
+fleet assertions. Individual package versions were not re-audited in November.
 This table records only software identity and version data. It intentionally
 excludes public IPs, SSH values, provider firewall state, app tokens and live
 endpoint URLs.

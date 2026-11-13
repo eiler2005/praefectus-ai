@@ -21,8 +21,8 @@ logrotate_targets:
     pattern: "*.log"
 
 # Expected application directories and containers are host-specific.
-# Per-host inventory vars may override these; legacy vault_expected_containers
-# is kept as the vps-hetzner-prod default.
+# Both managed hosts declare their active lists explicitly in inventory.
+# legacy vault_expected_containers remains a fallback for other inventories.
 expected_app_dirs: []
 expected_containers: "{{ vault_expected_containers | default([]) }}"
 # Intentionally disabled application containers are excluded from monitoring

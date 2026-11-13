@@ -18,6 +18,17 @@
   hosts: vps
   gather_facts: false
 
+  pre_tasks:
+    - name: "60 | safety | require explicit legacy workload recovery"
+      ansible.builtin.assert:
+        that:
+          - legacy_workloads_enabled | default(false) | bool
+        fail_msg: >-
+          This playbook targets retired OpenClaw-era bridges. Restore and audit
+          the owner-approved runtime first, then explicitly set
+          legacy_workloads_enabled=true and limit the intended host.
+      tags: [always]
+
   vars:
     # Less-critical services — apply limits now
     mem_wiki_import:             "{{ vault_mem_wiki_import             | default('256m') }}"

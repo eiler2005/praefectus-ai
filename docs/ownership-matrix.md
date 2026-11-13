@@ -2,7 +2,9 @@
 
 Who owns what on the VPS. Before any mutating action in another owner's zone, coordinate with that owner.
 
-This document is meant to be **forked and customised** for your deployment. The tables below show the maintainer's reference deployment as a template — replace the application rows with your own services.
+This is the managed fleet ownership map, reconciled on 2026-11-13. Historical
+runtime and archived data are labelled explicitly; directory existence alone
+does not mean that an application is active.
 
 ## System paths
 
@@ -28,30 +30,45 @@ This document is meant to be **forked and customised** for your deployment. The 
 
 ## Application paths in `/opt/`
 
-Each application running on the VPS is an "owner" with its own deploy pipeline. Replace the rows below with your own apps.
+Each application is an owner with its own deploy pipeline.
 
 | Path | Owner project | What's inside | Deployed via | PraefectusAI override |
 |---|---|---|---|---|
-| `/opt/<app-1>/` | `<app-1-repo>` | bridge service, sqlite, sessions | application's own ansible | `docker-compose.override.local.yml` for `mem_limit` |
 | `/opt/maxtg-bridge/` | `maxtg_bridge` | MAX -> Telegram bridge, SQLite state, MAX session, compose config | `maxtg_bridge` Ansible | host-level limits only; do not edit app compose/env directly |
 | `/opt/maxtg-watchdog/` | `maxtg_bridge` | External watchdog observing the production bridge host; state volume, pinned SSH key | `deploy/external-watchdog/deploy.sh` (application owner) | host-level limits only; never edit the app compose/env directly |
-| `/opt/<app-2>/` | `<app-2-repo>` | gateway, workspace, config | application's own deploy script | `mem_limit` |
+| `/opt/openclaw/` on `vps-hetzner-prod` | `openclaw_firststeps` | retired Gateway configuration and retained workspace; heavy agent/memory data archived off-host on 2026-11-13 | owner-approved restore only | historical resource policy; do not recreate automatically |
 | `/opt/fluentloop-bot/` | `fluentloop_bot` | Telegram learning bot, SQLite state, lesson/material data, compose config | application's own deploy script | host-level monitoring only; do not edit app compose/env directly |
-| `/opt/<app-3>/` | `<app-3-repo>` | KG + vector store (high OOM risk) | application's own deploy script | `mem_limit` (critical) |
-| `/opt/lightrag/` | `openclaw_firststeps` | LightRAG service, RAG storage, inputs, config, compose overrides | application's own deploy script | `docker-compose.override.local.yml` for host-level limits |
-| `/opt/<app-4>/` | `<app-4-repo>` | router service | application's own deploy script | `mem_limit` |
+| `/opt/lightrag/` on `vps-hetzner-prod` | `openclaw_firststeps` | retired legacy LightRAG configuration; data archived off-host on 2026-11-13 | owner-approved restore only | historical limits; distinct from the active My AI Office LightRAG on Hermes |
+| `/opt/ghostroute-console/` on `vps-hetzner-prod` | `router_configuration` | live Console, SQLite history and snapshots | routing project workflow | observe only; app data retention belongs to the owner |
 | `/opt/moex-futoi/` | `moex_futoi` | MOEX/FUTOI trading signal bot, market data, signal registry, reports, compose deploy files | application's own deploy script | host-level monitoring + bounded host swap only; do not edit app compose/env directly |
 | `/opt/cheap-intelligence/` on `vps-hostkey-hermes` | `AiNativeBook_Draft_26/services/digest-service` | digest API, inner Caddy, subscriber/issues volume and app secrets | app-owned `deploy/hermes-stack/` workflow | monitoring + encrypted backup only; do not edit app compose/env from this repo |
 | `/opt/reddit-compass/` on `vps-hostkey-hermes` | `reddit_compass` | trend radar: FastAPI + own Caddy (public HTTPS behind Basic Auth), Ladder paywall proxy, batch collector, both SQLite databases in `reddit-compass_data` | app-owned `deploy/hostkey/deploy.sh` | monitoring only; **not** in `host_backup_paths` (see note below); do not edit app compose/env from this repo |
-| `/opt/benka-hermes/` on `vps-hostkey-hermes` | `my-ai-office` | Hermes Gateway and dashboard, Benka integrations, Redis Streams, wiki, LightRAG, OmniRoute, private manifests and durable state | app-owned `deploy/hermes/` Compose workflow | monitor the 13 expected containers, audit the published panel listener, and back up `state/` + `private/` with encrypted restic; never edit Compose, env files, manifests, volumes, or application lifecycle from this repo |
-| `/opt/career-copilot/` on `vps-hostkey-hermes` | `career-copilot` | Private Career Copilot dashboard, authenticating HTTPS gateway and durable workspace | application-owned Compose workflow (verified 2026-09-14; gateway added 2026-09-15) | monitor `career-copilot-dashboard` and `career-copilot-gateway`, audit loopback `8100`/`8445`, and back up `workspace` with encrypted restic; the public `443` SNI route is owned by `router_configuration`; never edit Compose, env files, credentials, or private data from this repo |
-| `/opt/<routing-app>/` | `<routing-repo>` | stealth-routing config | routing project ansible | **No** |
-| `/opt/stealth/` on `vps-hostkey-hermes` | `router_configuration` | GhostRoute owned managed egress: Caddy layer4 + Xray/Reality + restricted resolver | `router_configuration` Ansible | verify only; do not edit compose/config from this repo |
-| `/opt/<obsidian-vault>/` | PraefectusAI (Syncthing host) | bidirectional sync with control machine | Syncthing | Yes |
+| `/opt/benka-hermes/` on `vps-hostkey-hermes` | `my-ai-office` | 13-service office; live data under `production/cutover-20260906/state`, including private state | app-owned `deploy/hermes/` Compose workflow | monitor and audit only; corrected encrypted backup scope is configured but not deployed (see coverage note); never edit Compose, env files, manifests, volumes or lifecycle from this repo |
+| `/opt/career-copilot/` on `vps-hostkey-hermes` | `career-copilot` | Dashboard, authenticating HTTPS gateway, read-only workspace and durable request/check volume | application-owned Compose workflow | monitor both containers and loopback `8100`/`8445`; workspace is backed up, durable volume awaits backup deployment; public `443` SNI route is routing-owned; never edit app configuration, credentials or private data from this repo |
+| `/opt/stealth/` on both hosts | `router_configuration` | GhostRoute owned managed egress: reverse proxy, Xray backends and restricted resolver | `router_configuration` Ansible | verify only; do not edit compose/config from this repo |
+| `/opt/obsidian-vault/` on `vps-hetzner-prod` | PraefectusAI (Syncthing host) | bidirectional sync with control machine | Syncthing | Yes |
+
+### Current state and backup coverage
+
+My AI Office's actual mounted state root is
+`/opt/benka-hermes/production/cutover-20260906/state` (including its private
+subtree). The old top-level `/opt/benka-hermes/state` and `private` paths do not
+exist. Inventory now selects the actual state root and the
+`career-copilot_dashboard_state` volume, alongside the existing digest volumes
+and Career Copilot workspace. As of the read-only reconciliation, the deployed
+Hermes backup script includes only the digest volumes and workspace. Coverage
+of office state and pending Career Copilot requests remains a deployment and
+restore-verification gap; successful timer status does not close that gap.
+
+The old office candidate builds and two failed/pre-refresh Career Copilot
+workspace copies were archived locally and removed on 2026-11-13. Active
+releases, production state, current workspace and `workspace-prev` remain.
+The Hetzner legacy `omniroute-data` volume was separately archived and removed;
+it is not the live Hermes OmniRoute data. See [the journal](journal/2026-11.md).
 
 ### Note: `reddit-compass` data is not backed up
 
-The `reddit-compass_data` volume holds the accumulated release history (~2 GB and
+The `reddit-compass_data` volume holds the accumulated release history (~13 GiB and
 growing every collection cycle). It is deliberately **absent** from
 `host_backup_paths`: backups go to a paid B2 repository, and the owner has not
 signed off on that recurring cost. Losing the volume loses the accumulated
@@ -73,7 +90,9 @@ PraefectusAI may (and should) impose host policy via `docker-compose.override.lo
 - Is **not** managed by the application owner.
 - Contains **only** host-level constraints: `mem_limit`, `memswap_limit`, `cpus`, `pids_limit`, `restart`, `logging.driver`.
 - Does not change services, ports, env, or volumes.
-- Is picked up automatically: `docker compose up` reads `docker-compose.yml + docker-compose.override.yml + docker-compose.override.local.yml`.
+- Must be selected explicitly with `-f docker-compose.override.local.yml` in the
+  owner's Compose invocation or equivalent `COMPOSE_FILE`; the `.local` name
+  is not a default Compose override filename.
 
 Example:
 

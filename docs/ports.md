@@ -1,10 +1,29 @@
 # Port map
 
-Canonical table of every network port on the VPS. Update when adding or removing services.
+Canonical active port map across both VPS hosts, reconciled on 2026-11-13.
+Update when adding or removing services. SSH access coordinates remain in Vault;
+any additional Vault-defined SSH listener is not published in this table.
 
 > This file is the source of truth for [`port-audit`](../modules/port-audit/bin/port-audit). When the audit reports a discrepancy, either update the live state or update this file — whichever is correct.
 
 **Tool:** `./modules/port-audit/bin/port-audit`
+
+The tables are a fleet-wide union, not a promise that every listener exists on
+both hosts. `port-audit` currently does not scope missing-port checks by host;
+interpret those lines against the host scope below. It also cannot establish
+provider/firewall source restrictions from bind addresses alone.
+
+- Hetzner: public `80`, `443`, `2087`, Syncthing; private Console `3000`/`3001`,
+  Xray `8443`/`18081`/`54321`, proxy admin `2019`, Syncthing UI `8384`, bridge
+  status `18140`; restricted Channel M `18057` and resolver `15353`.
+- Hermes: public `80`, `443`, Reddit `8450`, office `8451`; private digest
+  `8080`/`8444`, Career Copilot `8100`/`8445`, Reddit `8900`/`8901`, Xray
+  `8443`/`54321`, resolver control `8953`; resolver `15353` and restricted
+  watchdog receiver `18151`.
+- Hetzner resolver `15353` also binds a host interface, not only Docker/loopback.
+  Hermes watchdog `18151` binds all IPv4 interfaces. Source restriction remains
+  a firewall/provider verification item; these observations do not establish
+  safe public reachability. Do not broaden their intended source contracts.
 
 ---
 
@@ -47,31 +66,34 @@ Ports bound to the loopback interface only. Reachable from the VPS itself or via
 | 3000 | TCP | GhostRoute Console | `ghostroute-console` | application owner | app health/API |
 | 3001 | TCP | companion local app endpoint | application container | application owner | app health/API |
 | 8384 | TCP | Syncthing Web UI | system (syncthing) | PraefectusAI | `curl /rest/system/ping` |
-| 8020 | TCP | LightRAG app | `lightrag-lightrag-1` | application owner | app health/API |
 | 8080 | TCP | Cheap Intelligence digest API | `ci-digest` | `AiNativeBook_Draft_26/services/digest-service` | `/healthz`; admin only over SSH/loopback |
-| 8092 | TCP | AgentMail email bridge | `agentmail-email-bridge` | application owner | app health/API |
-| 8093 | TCP | Signals bridge | `signals-bridge` | application owner | app health/API |
-| 8094 | TCP | AgentMail work email bridge | `agentmail-work-email-bridge` | application owner | app health/API |
-| 8095 | TCP | Wiki import app | `wiki-import` | application owner | app health/API |
 | 8443 | TCP | Xray local backend | `xray` | routing project | local reverse-proxy/backend check |
 | 8444 | TCP | Cheap Intelligence inner TLS | `ci-caddy-inner` | `AiNativeBook_Draft_26/services/digest-service` | exact-SNI upstream from outer Caddy; container health on internal `:8081` |
 | 18140 | TCP | maxtg-bridge read-only status API | `deploy-bridge-1` | `maxtg_bridge` | `GET /healthz`; `GET /status` needs a bearer token. Reached from outside only through the watchdog's SSH channel |
 | 18081 | TCP | Channel B/XHTTP local backend | `xray-xhttp` | routing project | local backend check |
-| 18789 | TCP | OpenClaw gateway | `openclaw-openclaw-gateway-1` | application owner | intentionally disabled on `vps-hetzner-prod` since 2026-09-06 |
-| 18790 | TCP | OpenClaw gateway companion port | `openclaw-openclaw-gateway-1` | application owner | intentionally disabled on `vps-hetzner-prod` since 2026-09-06 |
-| 20128 | TCP | OmniRoute app endpoint | `omniroute` | application owner | app health/API |
-| 20129 | TCP | OmniRoute companion endpoint | `omniroute` | application owner | app health/API |
+| 8900 | TCP | Reddit Compass local UI | `rc-caddy` | `reddit_compass` | Hermes; loopback only, monitored by inventory guardrail |
+| 8901 | TCP | Reddit Compass direct API | `rc-api` | `reddit_compass` | Hermes; loopback only, monitored by inventory guardrail |
+| 8953 | TCP | Unbound control | host `unbound` | `router_configuration` | Hermes; loopback only |
 | 54321 | TCP | Xray API/local control endpoint | `xray` | routing project | local control only |
-
-Replace `<app port>` rows with your own services.
 
 ## Internal Docker networks (not reachable from host)
 
 | Service | Network | Internal port | Note |
 |---|---|---|---|
-| redis (example) | application_default | 6379 | available only inside the network |
 | maxtg bridge | deploy_default | bridge container reaches host gateway on 18057 | reverse Channel M maps proxy host to the Docker bridge gateway with `extra_hosts` |
 | My AI Office | benka-hermes internal network | Redis `6379`, LightRAG `9621`, OmniRoute `20128`, Gateway dashboard `9119` | Docker-only service ports. Caddy on `8451` is the sole host-published listener for this Compose project. |
+
+## Retired Hetzner listeners — historical reference
+
+These are absent from the active listener expectations. Legacy OpenClaw-era
+services require owner-approved recovery from the recorded archives before reuse.
+
+| Ports | Former workload | Status |
+|---|---|---|
+| 8020 | Legacy LightRAG | Retired; data archived off-host |
+| 8092–8095 | Legacy email, signals and wiki bridges | Retired standalone containers |
+| 18789–18790 | OpenClaw Gateway | Disabled since September; heavy state archived in November |
+| 20128–20129 | Legacy OmniRoute | Retired Hetzner runtime; volume archived and removed. Hermes office `20128` remains Docker-internal |
 
 ## External router-owned ports (not VPS listeners)
 

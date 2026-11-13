@@ -89,8 +89,16 @@ Telegram alert delivery is also vault-driven. If `vault_tg_infra_bot_token` or
 `vault_tg_infra_chat_id` is missing, the monitors still log locally but report
 `TELEGRAM: not configured`; this is a deliberate degraded mode, not a deploy
 failure. `ansible/inventory/production.yml` lists both monitoring timers in
-`expected_timers`, and `99-verify.yml` treats missing or inactive timers as a
+`expected_systemd_timers`, and `99-verify.yml` treats missing or inactive timers as a
 host health failure.
+
+The 2026-11-13 reconciliation found deployed-script drift: the Hermes poller
+still expects only five containers, while the Hetzner poller includes retired
+OpenClaw-era services. Telegram is not configured on either host. Inventory is
+the intended contract; editing it does not update the installed poller. The
+read-only `99-verify.yml` lists containers but does not currently assert the
+complete expected-container set or Docker health. A green host gate is not a
+complete application-health proof.
 
 ## Cross-project coordination
 

@@ -13,6 +13,12 @@ Compass, GhostRoute Channel M/D guardrails, public/restricted listener schemes,
 software versions and read-only test diagrams — see
 [`docs/vps-runtime-map.md`](docs/vps-runtime-map.md).
 
+The fleet was reconciled on **2026-11-13**: Hetzner has five persistent app/routing
+containers; Hermes has 25 app/routing containers plus a separate BuildKit
+builder. The Hetzner OpenClaw-era runtime is retired and archived. See the runtime
+map for observed state, deployment drift and backup coverage; inventory changes
+do not imply that monitoring or backup scripts have already been redeployed.
+
 PraefectusAI is a digital infrastructure administrator powered by an LLM agent. It operates your Linux VPS under an explicit mandate — narrow scope, deterministic actions, faithful reports back. The repo is its employment contract: the rules it follows, the skills it can use, the boundaries it must not cross, and the journal of everything it has done in your name.
 
 It works with Claude Code, Codex, Cursor, and any LLM agent that follows instructions, through the [`AGENTS.md`](AGENTS.md) contract pattern. Under the hood, the agent's actions are deterministic Ansible playbooks; its skills are CLI tools; its guardrails are Vault + scoped permissions; its memory is structured reports. Bring your own VPS — single host or small fleet — the patterns scale.
@@ -35,8 +41,8 @@ PraefectusAI is your AI sysadmin. It works for you 24/7. It costs you nothing (M
 
 | Cadence | What happens | Why you care |
 |---|---|---|
-| every 5 minutes | Health check on disk, memory, swap, load, container restarts and current-boot Docker ordering cycles. Telegram alert the moment something goes amber. | You learn about a problem before your users do. |
-| every Sunday 03:00 UTC | Safe cleanup of apt cache, `journalctl` (capped at 14 d / 500 MB), filtered `docker prune` (`--filter "until=24h"`). **Volumes are never touched.** | Disk-full outages stop happening. |
+| every 5 minutes | Health check on disk, memory, swap, load, container restarts and current-boot Docker ordering cycles. Telegram delivery requires configured credentials. | You learn about a problem before your users do. |
+| every Sunday 03:00 UTC | Cleanup of apt cache, `journalctl` (capped at 14 d / 500 MB), stopped containers older than 72h and images/build cache older than 168h. **Volumes are never automatically pruned.** Tagged images used by periodic jobs or rollback need explicit retention review. | Disk growth stays bounded when the deployed retention policy matches the workloads. |
 | every day 02:00 UTC | Encrypted backup of your application data to Backblaze B2 via `restic`. The password is yours alone. | If the VPS dies tomorrow, you lose hours, not weeks. |
 
 You wake up to a green status. Or to a Telegram message that already tells you what's wrong and where to look.
@@ -123,9 +129,9 @@ What you get when you "hire" PraefectusAI:
 
 The actual hands-on work — what runs on your VPS in your name, with the playbook or tool that does it:
 
-- **Cleans the disk** — `apt clean` + `autoremove`, `journalctl` vacuum (14 d / 500 MB cap), `docker container/image/builder prune` with `--filter "until=24h"`. Volumes are never touched. ([`10-disk-cleanup.yml`](ansible/playbooks/10-disk-cleanup.yml))
+- **Cleans the disk** — `apt clean` + `autoremove`, `journalctl` vacuum (14 d / 500 MB cap), stopped-container prune with `until=72h` and image/builder prune with `until=168h`. Volumes are never automatically pruned. ([`10-disk-cleanup.yml`](ansible/playbooks/10-disk-cleanup.yml))
 - **Schedules a weekly cleanup** — same safe operations as above, run autonomously every Sunday at 03:00 UTC via systemd timer. Output captured to `/var/log/vps-weekly-cleanup.log`. ([`11-schedule-cleanup.yml`](ansible/playbooks/11-schedule-cleanup.yml))
-- **Caps container resources** — applies memory, CPU, PID, restart, and log guardrails per container via `docker-compose.override.local.yml`, with `docker update` for instant effect where Docker supports it. Never edits the application's own compose file. ([`60-docker-limits.yml`](ansible/playbooks/60-docker-limits.yml), [`70-docker-limits-critical.yml`](ansible/playbooks/70-docker-limits-critical.yml))
+- **Caps container resources** — uses host-owned overrides and `docker update` where supported, without editing app Compose files. The bundled [`60`](ansible/playbooks/60-docker-limits.yml) / [`70`](ansible/playbooks/70-docker-limits-critical.yml) policies target retired OpenClaw-era workloads and require explicit `legacy_workloads_enabled=true` after owner-approved recovery; live Hermes apps own their resource limits.
 - **Hardens SSH and patches the OS** — `fail2ban` sshd jail (24 h ban after 3 retries), `unattended-upgrades` for `-security` only (no reboots), sshd `MaxSessions` enforcement. ([`40-security.yml`](ansible/playbooks/40-security.yml))
 - **Backs up application data** — daily encrypted snapshot to Backblaze B2 via `restic`. Operator holds the encryption password; even the agent can't read its own backups. ([`30-backup.yml`](ansible/playbooks/30-backup.yml))
 - **Watches health every 5 minutes** — disk, memory, swap, load, recent OOMs, container memory pressure, and restart counts; a separate 1-minute external watchdog checks cross-host reachability. Telegram alert on the first amber. ([`20-monitoring.yml`](ansible/playbooks/20-monitoring.yml))
@@ -276,8 +282,8 @@ Secrets live encrypted in `ansible/group_vars/all/vault.yml`; the vault password
 | 30 | `30-backup.yml` | restic + B2: encrypted offsite backups of application data. Daily timer at 02:00 UTC. | yes (one-shot setup) |
 | 40 | `40-security.yml` | `fail2ban` (sshd jail), `unattended-upgrades` (`-security` only), sshd `MaxSessions` enforcement, UFW audit. | yes |
 | 50 | `50-syncthing-audit.yml` | Reports `*.sync-conflict-*`, large files, peer status. Writes `reports/syncthing-audit-*.md`. | read + report |
-| 60 | `60-docker-limits.yml` | `mem_limit` overrides for less-critical containers. | yes (no auto-restart) |
-| 70 | `70-docker-limits-critical.yml` | CPU / memory / PID / restart guardrails for critical services with immediate `docker update`; log caps persist for the next compose recreate. | yes |
+| 60 | `60-docker-limits.yml` | Historical standalone bridge limits; disabled by default, explicit legacy recovery only. | yes (no auto-restart) |
+| 70 | `70-docker-limits-critical.yml` | Historical OpenClaw/OmniRoute/LightRAG limits; disabled by default, explicit legacy recovery only. Not the live Hermes office. | yes |
 | 99 | `99-verify.yml` | Read-only health gate. 12 checks. Emits `reports/health/*.json` + `reports/verify-*.md`. | **no** |
 
 Before any mutating playbook, run `--check --diff` and review the output. See [`AGENTS.md`](AGENTS.md) safety rules.

@@ -1,8 +1,13 @@
 # Container registry
 
-Inventory of every Docker container running on the VPS. Update when adding or removing services.
+Fleet container registry, reconciled against read-only Docker inspection on
+2026-11-13. Update when adding or removing services.
 
-> **This file is meant to be customised for your deployment.** The structure below is the template; fill in the rows with your own containers. A complete sanitised reference inventory from the maintainer's deployment lives at [`examples/sample-containers.md`](../examples/sample-containers.md).
+The intended app inventory lives in `ansible/inventory/production.yml`: five
+containers on Hetzner and 25 on Hermes. Hermes additionally runs the separate
+`buildx_buildkit_benka-migration0` builder (4 GiB memory limit). Short-lived MOEX
+jobs and the periodic Reddit collector are not permanent service expectations.
+Examples and per-container documentation templates below are not live services.
 
 ---
 
@@ -11,18 +16,18 @@ Inventory of every Docker container running on the VPS. Update when adding or re
 | Container | Criticality | Resource limit | Notes |
 |---|---|---|---|
 | `deploy-bridge-1` | CRITICAL | 512m | `maxtg_bridge` production bridge; MAX egress uses reverse Channel M through VPS docker bridge listener guarded by router_configuration firewall/watchdog units |
-| `openclaw-openclaw-gateway-1` | DISABLED | 1224m / 0.90 CPU / 256 pids / restart `on-failure:5` / logs `10m x3` | Intentionally disabled on `vps-hetzner-prod` by operator on 2026-09-06 after repeated resource pressure; data is retained and the monitor excludes it |
-| `omniroute` | CRITICAL | 512m / 0.25 CPU / 128 pids | LLM route proxy; limits from `70-docker-limits-critical.yml` |
-| `lightrag-lightrag-1` | CRITICAL | 2304m / 2816m swap / 0.45 CPU / 128 pids | Knowledge graph service; 2304m is intentional because lower caps caused cold-start OOM on the current graph |
+| `fluentloop-bot` | HIGH | No explicit Docker memory/CPU/PID cap | Hetzner; `fluentloop_bot`; Docker health healthy |
+| `ghostroute-console` | HIGH | No explicit Docker memory/CPU/PID cap; read-only rootfs | Hetzner; `router_configuration`; Docker health healthy |
+| `xray`, `xray-xhttp` | CRITICAL | No explicit Docker memory/CPU/PID cap | Hetzner routing owner; no Docker healthcheck configured |
+| `caddy`, `xray` on Hermes | CRITICAL | No explicit Docker memory/CPU/PID cap | `router_configuration`; no Docker healthcheck configured |
 | `maxtg-watchdog` | HIGH | 128m / 128 pids / logs `10m x3` | External watchdog on Hermes observing the production bridge host; read-only SSH probe, push receiver on 18151, Telegram alerts. Owned by `maxtg_bridge`, deployed from that repo |
 | `ci-digest` | HIGH | 256m / 0.50 CPU / 128 pids | Digest subscription API on Hermes; app-owned limits and persistent subscriber volume |
 | `ci-digest-postgres` | HIGH | 384m / 0.50 CPU / 128 pids | Private PostgreSQL source of truth for encrypted contacts, consent evidence and delivery queue |
 | `ci-caddy-inner` | HIGH | 128m / 0.25 CPU / 64 pids | Inner TLS terminator for the digest exact-SNI route; loopback-only host bind |
 | `moex-futoi-bot-1` | HIGH | 1536m / 2048m memswap / 256 pids | `moex_futoi` FX/Radar bot on Hermes; app-owned compose limit raised after a `fx_compass_full` cgroup OOM; host has a managed 2 GiB swap buffer |
-| `<container-1>` | CRITICAL | `<NN>m` | Source of limit (e.g. `70-docker-limits-critical.yml`) |
-| `<container-2>` | HIGH | `<NN>m` | |
-| `<container-3>` | MEDIUM | `<NN>m` | |
-| `<container-4>` | LOW | `<NN>m` | |
+| `rc-api` | HIGH | 512 MiB / 0.5 CPU / 128 PIDs | Hermes; `reddit_compass`; private API at `127.0.0.1:8901` |
+| `rc-caddy` | HIGH | 128 MiB | Hermes; authenticated HTTPS `8450`, private UI `127.0.0.1:8900` |
+| `ladder` | MEDIUM | 256 MiB | Hermes; Reddit collector proxy, Docker-internal only |
 
 Criticality scale:
 
@@ -38,7 +43,7 @@ Criticality scale:
 
 `my-ai-office` owns the `benka-hermes` Compose project under
 `/opt/benka-hermes`. The inventory below was reconciled by a read-only Docker
-inspection on 2026-09-07. Limits are application-owned Compose policy; they are
+inspection on 2026-11-13. Limits are application-owned Compose policy; they are
 recorded here so host monitoring can identify resource pressure, not so this
 repository can rewrite the application's Compose files.
 
@@ -64,16 +69,20 @@ workers consume their own streams, and the app records confirmed delivery or a
 manual-reconciliation item before a job is acknowledged. `reddit-compass` is a
 separate neighbour on the same host, not a My AI Office dependency.
 
-Host actions are limited to monitoring, port auditing, encrypted backups of
-`/opt/benka-hermes/state` and `/opt/benka-hermes/private`, and approved
-host-level cleanup. Do not run `docker compose` commands, use `chown -R`, prune
+The live state root is
+`/opt/benka-hermes/production/cutover-20260906/state`, with `data/`, `runtime/`
+and `private/` below it. The old top-level `state` and `private` paths do not
+exist. Inventory now selects the actual root for encrypted backups, but the
+installed backup script does not yet include it; deployment and restore proof
+are pending. Host actions remain monitoring, port auditing, approved backups
+and host-level cleanup. Do not run `docker compose` commands, use `chown -R`, prune
 volumes, or inspect application secrets from PraefectusAI.
 
 ## Career Copilot dashboard on Hermes
 `career-copilot` owns the deployed Compose project under `/opt/career-copilot`.
 The deployment was verified on 2026-09-14 after the application owner confirmed
 the container and healthcheck. The host layer monitors the service, audits its
-loopback-only listener, and backs up `/opt/career-copilot/workspace`; it does not
+loopback-only listener, and currently backs up `/opt/career-copilot/workspace`; it does not
 edit the application's Compose, environment, or private data.
 
 | Container | Service role | Criticality | Applied resource envelope |
@@ -82,9 +91,12 @@ edit the application's Compose, environment, or private data.
 | `career-copilot-gateway` | Authenticating HTTPS gateway (Caddy, TLS + Basic Auth) | HIGH | 128 MiB / 0.5 CPU; read-only rootfs, `cap_drop: ALL` + `NET_BIND_SERVICE` |
 
 The dashboard also mounts the named volume `career-copilot_dashboard_state` at
-`/data/state` for on-demand availability-check results only; they are imported
-into the private journal by the owner's publish script, so the volume is not a
-backup source. The workspace mount remains read-only.
+`/data/state` for availability-check results and pending request files. The
+owner's publish script imports pending requests, but requests awaiting import
+are durable state. Inventory now includes this volume in the desired backup
+scope; the installed backup script does not yet include it. The workspace
+mount remains read-only. The dashboard image was refreshed on 2026-11-04;
+the gateway retains its September runtime.
 
 The expected host bindings are `127.0.0.1:8100` (dashboard) and `127.0.0.1:8445`
 (gateway TLS). Dashboard health is `GET http://127.0.0.1:8100/healthz`; the
@@ -98,18 +110,23 @@ firewall change was needed because `443/tcp` was already public.
 
 ---
 
-## Known OpenClaw Runtime Limits
+## Retired Hetzner OpenClaw-era runtime
 
-These entries are host policy owned by PraefectusAI and persisted through
-`docker-compose.override.local.yml`; the base compose files remain
-`openclaw_firststeps` owned.
+The following limits are historical recovery references, not the active fleet.
+The base Compose files remain `openclaw_firststeps` owned. Legacy playbooks
+`60-docker-limits.yml` and `70-docker-limits-critical.yml` now require explicit
+`legacy_workloads_enabled=true` after an owner-approved restore and audit.
 
 ### Intentional disablement
 
-`openclaw-openclaw-gateway-1` is intentionally stopped on `vps-hetzner-prod` as
-of 2026-09-06. The host keeps `/opt/openclaw/config` and its Docker resources
-for a possible owner-led recovery, but PraefectusAI must not restart the
-gateway automatically or treat its absence as a new incident. Remove the
+The Gateway was disabled on 2026-09-06. On 2026-11-13 no Gateway, legacy
+OmniRoute or legacy LightRAG container existed. After explicit operator
+approval and verified local archiving, heavy agent/memory data and LightRAG
+data were removed; the inactive `omniroute-data` volume was removed. Configuration
+and directory skeletons remain. Recovery requires the archive described in
+[the November journal](journal/2026-11.md); it cannot use the empty data paths
+as if they held the previous runtime. Do not restart these services or treat
+their absence as a new incident. Remove the
 `disabled_containers` inventory marker only after `openclaw_firststeps` has
 approved a re-enable plan.
 
@@ -119,8 +136,8 @@ approved a re-enable plan.
 | `omniroute` | `openclaw_firststeps` | `127.0.0.1:20128-20129` | `omniroute-data` Docker volume | `70-docker-limits-critical.yml`: 512m, 0.25 CPU, 128 pids |
 | `lightrag-lightrag-1` | `openclaw_firststeps` | `127.0.0.1:8020` | `/opt/lightrag/data` | `70-docker-limits-critical.yml`: 2304m, 2816m swap, 0.45 CPU, 128 pids |
 
-Do not reduce LightRAG below `2304m` without coordinating with
-`openclaw_firststeps`; the current graph has previously OOMed at lower caps.
+The historical LightRAG graph OOMed below `2304m`. This is not the live
+`benka-hermes-lightrag-1` workload, which has a separate 4 GiB envelope on Hermes.
 
 ## Cheap Intelligence digest on Hermes
 

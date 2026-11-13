@@ -76,7 +76,14 @@ Architecture and rationale: [`architecture.md`](../architecture.md#monitoring-ar
 - Follow [docker-boot-and-oom.md](docker-boot-and-oom.md); Docker activity,
   SSH and a public listener alone do not prove the affected data-plane.
 
-### Containers (from `vault_expected_containers`)
+### Containers (from host `expected_containers` inventory)
+
+Both managed hosts declare their active containers in inventory; the legacy
+`vault_expected_containers` value is only a fallback for other inventories.
+The deployed pollers were still stale in the 2026-11-13 reconciliation. Apply
+these rules to the intended inventory after deployment; do not infer deployed
+coverage merely from an active timer. The host-only `99-verify.yml` currently
+lists containers without asserting the entire expected set or Docker health.
 
 | Metric | OK | WARN | CRIT |
 |---|---|---|---|
@@ -95,7 +102,10 @@ Architecture and rationale: [`architecture.md`](../architecture.md#monitoring-ar
 - If `openclaw-openclaw-gateway-1` is stopped after exhausting `restart=on-failure:5` and is not
   listed in `disabled_containers`, treat that as
   host protection rather than an ordinary down container. Check OOM/restart evidence, then apply
-  `70-docker-limits-critical.yml` and recreate only the Gateway after the resource cause is understood.
+  the historical `70-docker-limits-critical.yml` policy only after an explicit
+  owner-approved restore, `legacy_workloads_enabled=true` and a single-host
+  limit. The current fleet's OpenClaw-era runtime is retired; do not recreate it
+  as routine incident recovery.
 - An OOM or restart increase for a `benka-hermes-*` container is a host CRIT and
   an application-owner escalation. Preserve the evidence, verify free memory
   and disk, and let `my-ai-office` decide whether queue or runtime recovery is
