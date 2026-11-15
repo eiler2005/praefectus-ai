@@ -180,14 +180,26 @@ source adapter.
 
 ## Installed Software Versions
 
-Read-only fleet reconciliation on 2026-11-13:
+Qualified host maintenance on 2026-11-15. The role-only machine-readable
+[software inventory](../configs/software-inventory.json) separates observed
+runtime versions, application ownership and explicit compatibility holds.
 
 | Component | `vps-hetzner-prod` | `vps-hostkey-hermes` |
 |---|---|---|
-| OS | Ubuntu 24.04.4 LTS | Ubuntu 22.04.5 LTS |
-| Running kernel | `6.8.0-138-generic` | `5.15.0-186-generic` |
-| Docker Engine | `29.6.0` | `29.6.0` |
-| Docker Compose | `v5.1.4` | `v5.1.4` |
+| OS family | Ubuntu 24.04 LTS | Ubuntu 22.04 LTS |
+| Docker Engine | `29.9.3` | `29.9.3` |
+| Docker Compose | `5.7.1` | `5.7.1` |
+| containerd | `2.4.2` | `2.4.2` |
+| Owned routing edge Caddy | `2.11.9` | `2.11.9` |
+| Owned routing Xray | `26.11.9` | `26.6.1` compatibility hold |
+
+Both hosts completed the approved reboot; no reboot-required marker remained
+at verification. Host maintenance preserved the routing-owned Docker service
+guard. The sensitive role retained its earlier panel/core after newer REALITY
+failed authenticated application HTTPS with existing clients; its routing owner
+pins the exact qualified image digest. Configuration syntax alone is not a
+compatibility gate. Other application Caddy images and persistent BuildKit
+workers remain under their application owners and were not upgraded here.
 
 ### Historical package baseline — 2026-06-13
 

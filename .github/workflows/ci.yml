@@ -32,6 +32,10 @@ jobs:
         run: |
           cd ansible
           ansible-playbook --syntax-check playbooks/*.yml
+      - name: Software maintenance safety fixtures
+        run: |
+          python3 modules/software-maintenance/tests/test-runtime-packages.py
+          python3 modules/software-maintenance/tests/test-software-inventory.py
 
   lint:
     name: yamllint + ansible-lint

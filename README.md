@@ -8,6 +8,10 @@
 
 **Your AI sysadmin. Under contract.**
 
+[Software upgrade runbook](docs/runbooks/software-upgrades.md) and
+[host runtime maintenance](modules/software-maintenance/README.md) describe
+reviewed package upgrades, application-owner boundaries and rollback checks.
+
 For the current fleet runtime map — including My AI Office on Hermes, Reddit
 Compass, GhostRoute Channel M/D guardrails, public/restricted listener schemes,
 software versions and read-only test diagrams — see

@@ -1,0 +1,34 @@
+---
+- name: Reviewed stable Docker package maintenance
+  hosts: vps
+  gather_facts: false
+  become: true
+  vars:
+    software_maintenance_apply: false
+    software_maintenance_restart_approved: false
+    software_maintenance_backup_dir: /var/lib/praefectus/runtime-20261115
+  tasks:
+    - name: Read-only candidate and removal preview
+      ansible.builtin.script: ../../modules/software-maintenance/bin/runtime-packages.py
+      args:
+        executable: python3
+      check_mode: false
+      changed_when: false
+      register: runtime_preview
+      no_log: true
+    - name: Preview summary
+      ansible.builtin.debug:
+        msg: Candidate versions and apt simulation validated; application definitions are not changed
+    - name: Require separate restart approval before activation
+      ansible.builtin.assert:
+        that: software_maintenance_restart_approved | bool
+        fail_msg: Activation requires explicit Docker/container runtime restart approval
+      when: software_maintenance_apply | bool and not ansible_check_mode
+    - name: Activate reviewed packages with rollback files and live restore
+      ansible.builtin.script: >-
+        ../../modules/software-maintenance/bin/runtime-packages.py
+        --apply --restart-approved --backup-dir {{ software_maintenance_backup_dir | quote }}
+      args:
+        executable: python3
+      when: software_maintenance_apply | bool and not ansible_check_mode
+      no_log: true
