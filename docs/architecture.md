@@ -72,7 +72,9 @@ operator-disabled container in `disabled_containers`; the monitor then retains
 the inventory record without treating the stopped service as an outage.
 
 The same monitor also detects a Docker `systemd` ordering cycle in the current
-boot journal. It emits a non-destructive WARN because a cycle can prevent a
+boot journal (systemd manager messages only, excluding the monitor's own
+output), and checks the current Docker → lookup target → resolver → Docker
+dependency chain. It emits a non-destructive WARN because a cycle can prevent a
 routing-owned resolver or edge container from starting after reboot even when
 SSH remains reachable. The monitor records only the condition, not raw journal
 content; remediation belongs to the owner of the participating units. See
@@ -92,10 +94,13 @@ failure. `ansible/inventory/production.yml` lists both monitoring timers in
 `expected_systemd_timers`, and `99-verify.yml` treats missing or inactive timers as a
 host health failure.
 
-The 2026-11-13 reconciliation found deployed-script drift: the Hermes poller
-still expects only five containers, while the Hetzner poller includes retired
-OpenClaw-era services. Telegram is not configured on either host. Inventory is
-the intended contract; editing it does not update the installed poller. The
+The 2026-11-15 deployment resolves the stale poller lists: five expected
+containers on Hetzner and 25 on Hermes, excluding retired services, BuildKit
+and periodic jobs. Restart alerts use increments between successful polls,
+with identity/boot-aware baselines and an explicit maintenance acknowledgement.
+Docker healthchecks are checked when present. Hermes load thresholds are
+8/16 for its eight vCPUs; Hetzner retains 2/4. Telegram remains unconfigured
+on both hosts. Inventory changes still require a reviewed deployment. The
 read-only `99-verify.yml` lists containers but does not currently assert the
 complete expected-container set or Docker health. A green host gate is not a
 complete application-health proof.

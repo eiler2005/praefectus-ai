@@ -88,6 +88,9 @@ all:
                   owner: router_configuration / maxtg_bridge
                   expected_scope: docker_bridge
             vps-hostkey-hermes:
+              # Eight vCPUs: sustained load thresholds scale with host capacity.
+              loadavg_warn: 8.0
+              loadavg_crit: 16.0
               vps_display_name: hermes-ai-office-host
               expected_app_dirs:
                 - /opt/maxtg-watchdog

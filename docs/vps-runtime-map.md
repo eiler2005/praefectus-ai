@@ -23,11 +23,14 @@ and 61% on Hermes; see [the operations journal](journal/2026-11.md).
 
 Repository configuration and installed scripts are not yet identical:
 
-- Inventory now records all five Hetzner containers and excludes the retired
-  OpenClaw-era services. The installed Hetzner poller still expects the old
-  services; the Hermes poller expects only five of the 25 app containers.
+- Monitoring reconciled on 2026-11-15: installed pollers cover all five
+  Hetzner and 25 Hermes expected containers. Restart history from planned
+  maintenance is baselined; subsequent increments and configured Docker
+  healthchecks are monitored. Hermes load thresholds now reflect eight vCPUs.
 - Infrastructure Telegram delivery is not configured on either host. The
-  Hermes monitor also retains a current-boot Docker ordering-cycle warning.
+  Hermes still has a verified Docker → nss-lookup → Unbound → Docker unit
+  cycle. Routing-owned resolver configuration needs a separate owner fix;
+  monitoring does not alter it or restart Docker.
 - The installed Hermes backup script covers the two digest volumes and Career
   Copilot workspace. Inventory now selects the actual office state root and
   the Career Copilot durable request/check volume too; these additions require

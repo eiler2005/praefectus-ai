@@ -26,7 +26,8 @@ Architecture and rationale: [`architecture.md`](../architecture.md#monitoring-ar
 
 **Actions:**
 - WARN → log; check `./modules/disk-observatory/bin/disk-report`.
-- CRIT → log + Telegram alert + run `10-disk-cleanup.yml`.
+- CRIT → log + Telegram when configured; audit disk use and review
+  `10-disk-cleanup.yml --check --diff` before an operator-approved cleanup.
 
 ### Memory (RAM)
 
@@ -38,7 +39,7 @@ Architecture and rationale: [`architecture.md`](../architecture.md#monitoring-ar
 
 **Actions:**
 - WARN → log; check `docker stats --no-stream` for OOM candidates.
-- CRIT → log + Telegram alert + include top-5 processes by RSS in the alert.
+- CRIT → log + Telegram when configured; inspect processes and container limits.
 - On Hermes, sustained pressure from `benka-hermes-gateway-1` or
   `benka-hermes-lightrag-1` is an early warning: capture host evidence and
   coordinate with `my-ai-office`; do not alter its Compose limits or restart
@@ -48,7 +49,8 @@ Architecture and rationale: [`architecture.md`](../architecture.md#monitoring-ar
 
 | Metric | OK | WARN | CRIT |
 |---|---|---|---|
-| `load_5min` | < 2.0 | 2.0–3.9 | ≥ 4.0 |
+| Hetzner `load_5min` (2 vCPU) | < 2.0 | 2.0–3.9 | ≥ 4.0 |
+| Hermes `load_5min` (8 vCPU) | < 8.0 | 8.0–15.9 | ≥ 16.0 |
 
 **Actions:**
 - WARN → log.
@@ -61,13 +63,13 @@ Architecture and rationale: [`architecture.md`](../architecture.md#monitoring-ar
 | `systemctl is-active docker` | active | — | inactive |
 
 **Actions:**
-- CRIT → Telegram alert with the last 20 lines of `journalctl -u docker`.
+- CRIT → local log + Telegram when configured; inspect `journalctl -u docker`.
 
 ### Docker boot ordering
 
 | Metric | OK | WARN | CRIT |
 |---|---|---|---|
-| current-boot Docker `ordering cycle` / `dependency cycle` | absent | present | — |
+| Docker cycle in current-boot systemd manager log or current Docker/resolver graph | absent | present | — |
 
 **Actions:**
 - WARN → inspect the unit graph; do not restart Docker automatically.
@@ -80,25 +82,35 @@ Architecture and rationale: [`architecture.md`](../architecture.md#monitoring-ar
 
 Both managed hosts declare their active containers in inventory; the legacy
 `vault_expected_containers` value is only a fallback for other inventories.
-The deployed pollers were still stale in the 2026-11-13 reconciliation. Apply
-these rules to the intended inventory after deployment; do not infer deployed
-coverage merely from an active timer. The host-only `99-verify.yml` currently
+The 2026-11-15 monitoring deployment reconciles five expected containers on
+Hetzner and 25 on Hermes. The independent BuildKit builder and periodic jobs
+are excluded from the always-on contract. Docker health is checked when
+configured: unhealthy is CRIT, starting is WARN, absent healthcheck is allowed. The host-only `99-verify.yml` currently
 lists containers without asserting the entire expected set or Docker health.
 
 | Metric | OK | WARN | CRIT |
 |---|---|---|---|
 | All expected containers running | all | — | at least one down |
-| Healthcheck (http / tcp / docker) | ok | — | fail |
-| RestartCount over 24 h | 0–2 | 3–9 | ≥ 10 |
-| High-risk container RestartCount increase | no increase | any increase | repeated increase plus OOM |
+| Docker healthcheck (when configured) | healthy / absent | starting | unhealthy |
+| New restarts since previous successful inspection (normally 5 min) | 0 | 1–9 | ≥ 10 |
 | Container listed in `disabled_containers` | intentionally stopped | — | — |
 
 **Actions:**
-- Container not running → CRIT + Telegram with name + last 20 lines of `docker logs`.
+- Container not running → CRIT in local log and Telegram when configured.
+- Failed Docker inspection → CRIT; retain the last successful restart baseline.
 - A container listed in the host's `disabled_containers` inventory variable is
   intentionally stopped: exclude it from expected-container alerts and do not
   restart it automatically.
-- RestartCount ≥ 3 → WARN in log; check `docker logs <name>`.
+- New restarts → WARN (CRIT at ten per interval); inspect application logs.
+  Lifetime RestartCount is not a 24-hour rate. First observation, a new boot,
+  container replacement or a counter reset establishes a fresh baseline.
+  Events entirely between polls or during a reboot may not be observable.
+- After approved maintenance, acknowledge only restart history with:
+  `./ansible/scripts/ssh-vps.sh --host <alias> 'sudo python3 /usr/local/bin/vps-monitor.py --once --baseline-restarts'`.
+  Missing/unhealthy containers, disk, RAM, OOM and ordering-cycle checks stay
+  active. The next successful poll detects new increments normally.
+- CLI exit codes: 0 OK, 1 WARN, 2 CRIT; systemd marks nonzero checks failed.
+  Inspect the reported issue before treating this as a Python crash.
 - If `openclaw-openclaw-gateway-1` is stopped after exhausting `restart=on-failure:5` and is not
   listed in `disabled_containers`, treat that as
   host protection rather than an ordinary down container. Check OOM/restart evidence, then apply
@@ -106,8 +118,8 @@ lists containers without asserting the entire expected set or Docker health.
   owner-approved restore, `legacy_workloads_enabled=true` and a single-host
   limit. The current fleet's OpenClaw-era runtime is retired; do not recreate it
   as routine incident recovery.
-- An OOM or restart increase for a `benka-hermes-*` container is a host CRIT and
-  an application-owner escalation. Preserve the evidence, verify free memory
+- An OOM for a `benka-hermes-*` container is CRIT; a new restart is WARN
+  (CRIT at ten per interval). Both warrant application-owner investigation. Preserve the evidence, verify free memory
   and disk, and let `my-ai-office` decide whether queue or runtime recovery is
   safe.
 

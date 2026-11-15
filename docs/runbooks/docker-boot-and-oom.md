@@ -57,8 +57,12 @@ an edge path that fails while unrelated host access still works.
 ### Evidence and alert level
 
 `vps-monitor.py` records a `WARN` named `docker_boot_ordering_cycle` when the
-current boot's systemd journal contains a Docker `ordering cycle` or
-`dependency cycle`.
+current boot's systemd manager journal (`_PID=1`) contains a Docker
+`ordering cycle` or `dependency cycle`, or the current Docker →
+`nss-lookup.target` → resolver → Docker chain is present. Restricting the
+journal source prevents the monitor's own warnings from feeding back into
+the detector. Historical manager events remain visible for the current boot;
+review the graph before deciding whether remediation is complete.
 It intentionally reports no raw journal line. A cycle is `WARN`, not an
 automatic restart trigger: restarting Docker can drop unrelated applications
 and does not repair a bad unit graph.

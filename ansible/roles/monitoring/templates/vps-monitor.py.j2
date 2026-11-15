@@ -22,7 +22,6 @@ SWAP_CRIT_PCT = {{ vault_swap_crit_pct | default(80) }}
 CONTAINER_MEM_WARN_PCT = {{ vault_container_mem_warn_pct | default(80) }}
 CONTAINER_MEM_CRIT_PCT = {{ vault_container_mem_crit_pct | default(95) }}
 OOM_LOOKBACK_MINUTES = {{ vault_oom_lookback_minutes | default(10) }}
-HIGH_RISK_RESTART_WARN = {{ vault_high_risk_restart_warn | default(1) }}
 
 {% set monitor_expected_containers = monitoring_expected_containers | default(expected_containers | default([])) %}
 {% set monitor_disabled_containers = monitoring_disabled_containers | default([]) %}
@@ -32,11 +31,6 @@ EXPECTED_CONTAINERS = [
 {% if c_name not in monitor_disabled_containers %}
     "{{ c_name }}",
 {% endif %}
-{% endfor %}
-]
-HIGH_RISK_CONTAINERS = [
-{% for c in vault_high_risk_containers | default(['openclaw-openclaw-gateway-1']) %}
-    "{{ c }}",
 {% endfor %}
 ]
 
@@ -73,8 +67,9 @@ def load_state():
 def save_state(state):
     try:
         os.makedirs(os.path.dirname(STATE_FILE), exist_ok=True)
-        with open(STATE_FILE, "w") as f:
+        with open(STATE_FILE + ".tmp", "w") as f:
             json.dump(state, f, indent=2)
+        os.replace(STATE_FILE + ".tmp", STATE_FILE)
     except Exception as e:
         log(f"WARN: could not save state: {e}")
 
@@ -149,32 +144,44 @@ def collect():
     # Docker daemon
     metrics["docker_active"] = shell("systemctl is-active docker") == "active"
     docker_ordering_raw = shell(
-        "journalctl -b --no-pager -o cat 2>/dev/null | "
+        "journalctl -b _PID=1 --no-pager -o cat 2>/dev/null | "
         "grep -Ei '(ordering cycle|dependency cycle).*docker|docker.*(ordering cycle|dependency cycle)' | tail -20"
     )
     metrics["docker_boot_ordering_cycle"] = bool(docker_ordering_raw.strip())
+    # Detect the known resolver bridge cycle even without a retained boot event.
+    docker_after = shell("systemctl show docker.service -p After --value").split()
+    lookup_after = shell("systemctl show nss-lookup.target -p After --value").split()
+    metrics["docker_resolver_cycle"] = (
+        "nss-lookup.target" in docker_after
+        and any("docker.service" in shell(
+            "systemctl show " + unit + " -p After --value"
+        ).split() for unit in lookup_after if unit.endswith(".service"))
+    )
+    metrics["boot_id"] = shell("cat /proc/sys/kernel/random/boot_id")
 
     # Containers
     running_raw = shell("docker ps --format '{{ '{{' }}.Names{{ '}}' }}' 2>/dev/null")
     metrics["running_containers"] = [c for c in running_raw.splitlines() if c]
 
-    # Restart counts
-    restarts_raw = shell("""docker ps -q 2>/dev/null | xargs docker inspect 2>/dev/null | python3 -c "
-import json,sys
-data=json.load(sys.stdin)
-for c in data:
-    rc=c.get('RestartCount',0)
-    if rc>0:
-        print(c['Name'].lstrip('/')+':'+str(rc))
-" 2>/dev/null""")
-    metrics["restart_counts"] = {}
-    for line in restarts_raw.splitlines():
-        if ":" in line:
-            name, cnt = line.rsplit(":", 1)
-            try:
-                metrics["restart_counts"][name] = int(cnt)
-            except ValueError:
-                pass
+    # Inspect only expected services; no app environment/config is collected.
+    inspect_raw = shell("docker ps -aq | xargs -r docker inspect --format "
+                        "'{\"Name\":{{ '{{' }}json .Name{{ '}}' }},"
+                        "\"Id\":{{ '{{' }}json .Id{{ '}}' }},"
+                        "\"RestartCount\":{{ '{{' }}.RestartCount{{ '}}' }},"
+                        "\"State\":{{ '{{' }}json .State{{ '}}' }}}' 2>/dev/null")
+    metrics["containers"] = {}
+    metrics["inspect_ok"] = bool(inspect_raw)
+    try:
+        for line in inspect_raw.splitlines():
+            c = json.loads(line)
+            name = c["Name"].lstrip("/")
+            if name in EXPECTED_CONTAINERS:
+                metrics["containers"][name] = {
+                    "id": c["Id"], "restarts": c.get("RestartCount", 0),
+                    "health": c.get("State", {}).get("Health", {}).get("Status"),
+                }
+    except (ValueError, KeyError, TypeError):
+        metrics["inspect_ok"] = False
 
     # Docker memory pressure
     stats_raw = shell("docker stats --no-stream --format '{{ '{{' }}.Name{{ '}}' }} {{ '{{' }}.MemPerc{{ '}}' }}' 2>/dev/null")
@@ -231,11 +238,11 @@ def evaluate(metrics, state):
     if not metrics["docker_active"]:
         issues.append(("crit", "docker", "Docker daemon is NOT active"))
 
-    if metrics.get("docker_boot_ordering_cycle"):
+    if metrics.get("docker_boot_ordering_cycle") or metrics.get("docker_resolver_cycle"):
         issues.append((
             "warn",
             "docker_boot_ordering_cycle",
-            "Docker systemd ordering cycle in current boot; inspect unit graph before restart",
+            "Docker ordering cycle in manager boot journal or current resolver unit graph; inspect before restart",
         ))
 
     running = metrics["running_containers"]
@@ -243,14 +250,22 @@ def evaluate(metrics, state):
         if expected not in running:
             issues.append(("crit", f"container:{expected}", f"Container {expected} NOT running"))
 
-    for name, cnt in metrics.get("restart_counts", {}).items():
-        prev = int(state.get(f"restart_count:{name}", 0))
-        if name in HIGH_RISK_CONTAINERS and cnt >= HIGH_RISK_RESTART_WARN and cnt > prev:
-            issues.append(("warn", f"restarts:{name}:increase", f"{name} RestartCount increased {prev}->{cnt}"))
-        if cnt >= 10:
-            issues.append(("crit", f"restarts:{name}", f"{name} RestartCount={cnt}"))
-        elif cnt >= 3:
-            issues.append(("warn", f"restarts:{name}", f"{name} RestartCount={cnt}"))
+    if not metrics.get("inspect_ok"):
+        issues.append(("crit", "docker_inspect", "Cannot inspect Docker container state"))
+    previous = state.get("restart_baseline", {})
+    same_boot = state.get("restart_boot_id") == metrics.get("boot_id")
+    for name, c in metrics.get("containers", {}).items():
+        health = c["health"]
+        if health == "unhealthy":
+            issues.append(("crit", f"health:{name}", f"Container {name} unhealthy"))
+        elif health == "starting":
+            issues.append(("warn", f"health:{name}", f"Container {name} healthcheck starting"))
+        prev = previous.get(name)
+        if same_boot and prev and prev["id"] == c["id"]:
+            delta = c["restarts"] - prev["restarts"]
+            if delta > 0:
+                level = "crit" if delta >= 10 else "warn"
+                issues.append((level, f"restarts:{name}", f"{name} restarted {delta} times since previous check"))
 
     for name, pct in metrics.get("container_mem_pct", {}).items():
         if pct >= CONTAINER_MEM_CRIT_PCT:
@@ -273,7 +288,7 @@ def maybe_send_heartbeat(metrics, state):
         return
     if state.get(today_key):
         return
-    running_cnt = len(metrics["running_containers"])
+    running_cnt = len(set(metrics["running_containers"]) & set(EXPECTED_CONTAINERS))
     expected_cnt = len(EXPECTED_CONTAINERS)
     text = (
         f"✅ <b>{HOST_NAME} alive</b>\n"
@@ -289,12 +304,12 @@ def maybe_send_heartbeat(metrics, state):
         log("Heartbeat sent")
 
 # ---- Main ----
-def run_once(test_alert=False):
+def run_once(test_alert=False, baseline_restarts=False):
     if test_alert:
         log("Sending test alert to Telegram...")
         ok = send_telegram(f"🧪 <b>TEST</b> | vps-monitor test alert from {HOST_NAME}", silent=True)
         log("OK" if ok else "FAILED (check TG tokens in vault)")
-        return 0
+        return 0 if ok else 3
 
     log("=== Health check START ===")
     metrics = collect()
@@ -302,9 +317,12 @@ def run_once(test_alert=False):
     log(f"disk={metrics['disk_pct']}%  mem={metrics['mem_avail_mb']}M  "
         f"swap={metrics['swap_pct']}%  load={metrics['load_5min']:.2f}  "
         f"docker={'active' if metrics['docker_active'] else 'INACTIVE'}  "
-        f"containers={len(metrics['running_containers'])}/{len(EXPECTED_CONTAINERS)}")
+        f"containers={len(set(metrics['running_containers']) & set(EXPECTED_CONTAINERS))}/{len(EXPECTED_CONTAINERS)}")
 
     state = load_state()
+    if baseline_restarts:
+        state.pop("restart_baseline", None)
+        log("Maintenance acknowledged: restart baseline only; all other checks remain active")
     issues = evaluate(metrics, state)
     exit_code = 0
 
@@ -321,8 +339,9 @@ def run_once(test_alert=False):
         log("All checks OK")
 
     maybe_send_heartbeat(metrics, state)
-    for name, cnt in metrics.get("restart_counts", {}).items():
-        state[f"restart_count:{name}"] = cnt
+    if metrics.get("inspect_ok"):
+        state["restart_baseline"] = metrics["containers"]
+        state["restart_boot_id"] = metrics["boot_id"]
     save_state(state)
     log("=== Health check END ===")
     return exit_code
@@ -331,6 +350,7 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="vps-monitor — VPS health check")
     parser.add_argument("--once",       action="store_true", help="Run one check and exit")
     parser.add_argument("--test-alert", action="store_true", help="Send test Telegram message and exit")
+    parser.add_argument("--baseline-restarts", action="store_true", help="Acknowledge maintenance restarts; keep other health checks active")
     args = parser.parse_args()
 
-    sys.exit(run_once(test_alert=args.test_alert))
+    sys.exit(run_once(test_alert=args.test_alert, baseline_restarts=args.baseline_restarts))

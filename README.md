@@ -21,7 +21,9 @@ The fleet was reconciled on **2026-11-13**: Hetzner has five persistent app/rout
 containers; Hermes has 25 app/routing containers plus a separate BuildKit
 builder. The Hetzner OpenClaw-era runtime is retired and archived. See the runtime
 map for observed state, deployment drift and backup coverage; inventory changes
-do not imply that monitoring or backup scripts have already been redeployed.
+do not imply deployment. Monitoring was reconciled on 2026-11-15 (5/25
+expected containers, Docker healthchecks, maintenance-aware restart deltas);
+the documented backup-scope deployment remains pending.
 
 PraefectusAI is a digital infrastructure administrator powered by an LLM agent. It operates your Linux VPS under an explicit mandate — narrow scope, deterministic actions, faithful reports back. The repo is its employment contract: the rules it follows, the skills it can use, the boundaries it must not cross, and the journal of everything it has done in your name.
 

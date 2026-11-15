@@ -30,6 +30,7 @@
   delegate_to: localhost
   become: false
   check_mode: false
+  diff: false
 
 - name: "monitoring | deploy vps-monitor.py"
   ansible.builtin.copy:
@@ -40,6 +41,8 @@
     mode: "0700"
   become: true
   register: r_script
+  diff: false
+  no_log: true
 
 - name: "monitoring | cleanup rendered local copy"
   ansible.builtin.file:
@@ -51,6 +54,7 @@
 
 # ---- External watchdog script ----
 - name: "monitoring | render vps-external-watchdog.py locally"
+  diff: false
   ansible.builtin.template:
     src: vps-external-watchdog.py.j2
     dest: "{{ playbook_dir }}/../../reports/.vps-external-watchdog-rendered-{{ inventory_hostname }}.py"
@@ -68,6 +72,8 @@
     mode: "0700"
   become: true
   register: r_external_script
+  diff: false
+  no_log: true
 
 - name: "monitoring | cleanup rendered external watchdog copy"
   ansible.builtin.file:
@@ -172,8 +178,4 @@
       - "Log:    /var/log/vps-monitor.log"
       - "External log: /var/log/vps-external-watchdog.log"
       - ""
-      - "Manual check:   ssh {{ ansible_user }}@{{ ansible_host }} 'sudo python3 /usr/local/bin/vps-monitor.py --once'"
-      - "Test Telegram:  ssh {{ ansible_user }}@{{ ansible_host }} 'sudo python3 /usr/local/bin/vps-monitor.py --test-alert'"
-      - "Watchdog test:  ssh {{ ansible_user }}@{{ ansible_host }} 'sudo python3 /usr/local/bin/vps-external-watchdog.py --test-alert'"
-      - "View log:       ssh {{ ansible_user }}@{{ ansible_host }} 'sudo tail -50 /var/log/vps-monitor.log'"
-      - "Timer status:   ssh {{ ansible_user }}@{{ ansible_host }} 'systemctl status vps-monitor.timer'"
+      - "Manual check: ./modules/monitoring/bin/run-check --host {{ inventory_hostname }}"

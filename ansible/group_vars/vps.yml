@@ -44,4 +44,3 @@ swap_crit_pct_default: 80
 container_mem_warn_pct_default: 80
 container_mem_crit_pct_default: 95
 oom_lookback_minutes_default: 10
-high_risk_restart_warn_default: 1
