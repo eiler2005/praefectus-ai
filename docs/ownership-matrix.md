@@ -50,6 +50,14 @@ Each application is an owner with its own deploy pipeline.
 
 ### Current state and backup coverage
 
+Hetzner received a verified one-off B2 recovery snapshot and an independent
+encrypted Mac copy on 2026-11-15, covering active application directories,
+container mounts and host configuration. This does not change the deployed
+daily legacy job's narrower scope. The additional cloud check after pruning
+was blocked by the B2 read cap; full cloud and Mac restore checks passed before
+replacement. See [backup refresh](runbooks/backup-refresh.md) and
+[the journal](journal/2026-11.md) for exact snapshot IDs and remaining checks.
+
 My AI Office's actual mounted state root is
 `/opt/benka-hermes/production/cutover-20260906/state` (including its private
 subtree). The old top-level `/opt/benka-hermes/state` and `private` paths do not
