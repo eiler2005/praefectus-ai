@@ -4,6 +4,33 @@ Read [ownership](../ownership-matrix.md) and [security](../../SECURITY.md) first
 This procedure creates a recovery backup without stopping applications or
 changing their configuration. It is a file/data backup, not a bootable disk image.
 
+## Current bucket policy after the operator's follow-up
+
+On 2026-11-15 the operator explicitly requested deletion of **both** previous
+repositories, including Hermes, leaving only the fresh Hetzner backup. This
+supersedes the initial plan to retain 21 historical Hetzner snapshots.
+
+The bucket now contains only `vps-hetzner-prod/`: an independent encrypted
+repository uploaded from the verified Mac copy (15 objects, 174,605,253 bytes).
+Its sole snapshot is `db645122`, with original source ID `185637d6`.
+All encrypted object sizes and SHA-1 checksums matched B2 upload responses and
+a subsequent version listing. Cloud download verification remains subject to
+the account's `download_cap_exceeded` limit; no cap was raised. The local
+full-data/restore/SQLite checks remain applicable to the identical repository.
+
+Only after validating the new prefix were all versions under `vps-prod/` and
+`vps-hostkey-hermes/` deleted. This was explicit whole-repository retirement,
+not deletion of shared packs inside a repository still in use. The independent
+Mac repository and its verification receipt remain available.
+
+Hetzner's `/etc/restic/env` now points to the canonical `vps-hetzner-prod`
+prefix; its daily timer remains enabled with the narrower legacy source scope.
+Hermes backup scheduling is disabled, and inventory sets `backup_enabled: false`.
+`30-backup.yml` ends that host before setup, init or run tasks, even with tags.
+Hermes has no retained B2 recovery history in this bucket. Re-enabling backups
+requires an explicit operator decision and a reviewed deployment/restore test.
+Application data on the VPS hosts was not removed or changed.
+
 ## Existing backup contract
 
 The original Hetzner job is `/usr/local/bin/vps-backup.sh`, installed from
@@ -87,7 +114,7 @@ Archive files can contain older invalid databases, retained for forensic history
 
 The restic password remains in Vault and must also have an independent operator
 recovery copy. An encrypted Mac repository does not solve loss of that password.
-The daily legacy job is unchanged by a manual refresh; restore by the explicit
+The daily legacy job's input scope is unchanged by a manual refresh; restore by the explicit
 verified snapshot ID/tag rather than an unqualified `latest` after later timer runs.
 
 For the verified November Mac copy, an isolated restore can be started with:

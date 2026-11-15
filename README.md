@@ -23,7 +23,9 @@ builder. The Hetzner OpenClaw-era runtime is retired and archived. See the runti
 map for observed state, deployment drift and backup coverage; inventory changes
 do not imply deployment. Monitoring was reconciled on 2026-11-15 (5/25
 expected containers, Docker healthchecks, maintenance-aware restart deltas);
-the documented backup-scope deployment remains pending.
+B2 now retains only the verified Hetzner recovery copy, with an independent
+encrypted Mac copy. Hermes B2 backups were retired and disabled by the operator
+on 2026-11-15; see [backup policy and restore](docs/runbooks/backup-refresh.md).
 
 PraefectusAI is a digital infrastructure administrator powered by an LLM agent. It operates your Linux VPS under an explicit mandate — narrow scope, deterministic actions, faithful reports back. The repo is its employment contract: the rules it follows, the skills it can use, the boundaries it must not cross, and the journal of everything it has done in your name.
 

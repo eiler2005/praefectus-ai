@@ -35,6 +35,12 @@
     keep_weekly:  4
     keep_monthly: 3
 
+  pre_tasks:
+    - name: "30 | policy | skip hosts with retired backups"
+      ansible.builtin.meta: end_host
+      when: not (backup_enabled | default(true) | bool)
+      tags: [always]
+
   tasks:
 
     # ---- INSTALL ----

@@ -16,6 +16,7 @@ all:
           hosts:
             vps-hetzner-prod:
               vps_display_name: hetzner-routing-app-host
+              backup_enabled: true
               expected_app_dirs:
                 - /opt/maxtg-bridge
                 - /opt/fluentloop-bot
@@ -92,6 +93,8 @@ all:
               loadavg_warn: 8.0
               loadavg_crit: 16.0
               vps_display_name: hermes-ai-office-host
+              # Operator retired this host's B2 repository on 2026-11-15.
+              backup_enabled: false
               expected_app_dirs:
                 - /opt/maxtg-watchdog
                 - /opt/stealth
@@ -190,8 +193,6 @@ all:
                 - name: vps-monitor.timer
                   owner: vps_management
                 - name: vps-external-watchdog.timer
-                  owner: vps_management
-                - name: vps-backup.timer
                   owner: vps_management
               restricted_tcp_listeners:
                 # Unauthenticated reddit-compass entrypoints. Docker writes its

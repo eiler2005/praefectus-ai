@@ -72,9 +72,9 @@ separate neighbour on the same host, not a My AI Office dependency.
 The live state root is
 `/opt/benka-hermes/production/cutover-20260906/state`, with `data/`, `runtime/`
 and `private/` below it. The old top-level `state` and `private` paths do not
-exist. Inventory now selects the actual root for encrypted backups, but the
-installed backup script does not yet include it; deployment and restore proof
-are pending. Host actions remain monitoring, port auditing, approved backups
+exist. Inventory retains this root as candidate backup scope, but the operator
+retired Hermes B2 history and disabled its backup schedule on 2026-11-15.
+No current B2 recovery coverage is claimed. Host actions remain monitoring, port auditing, approved backups
 and host-level cleanup. Do not run `docker compose` commands, use `chown -R`, prune
 volumes, or inspect application secrets from PraefectusAI.
 
@@ -82,7 +82,8 @@ volumes, or inspect application secrets from PraefectusAI.
 `career-copilot` owns the deployed Compose project under `/opt/career-copilot`.
 The deployment was verified on 2026-09-14 after the application owner confirmed
 the container and healthcheck. The host layer monitors the service, audits its
-loopback-only listener, and currently backs up `/opt/career-copilot/workspace`; it does not
+loopback-only listener. Hermes B2 backups, including workspace history, were
+retired by the operator on 2026-11-15; the host layer does not
 edit the application's Compose, environment, or private data.
 
 | Container | Service role | Criticality | Applied resource envelope |
@@ -93,8 +94,8 @@ edit the application's Compose, environment, or private data.
 The dashboard also mounts the named volume `career-copilot_dashboard_state` at
 `/data/state` for availability-check results and pending request files. The
 owner's publish script imports pending requests, but requests awaiting import
-are durable state. Inventory now includes this volume in the desired backup
-scope; the installed backup script does not yet include it. The workspace
+are durable state. Inventory retains this volume as candidate backup scope,
+but Hermes B2 backup scheduling is disabled by operator policy. The workspace
 mount remains read-only. The dashboard image was refreshed on 2026-11-04;
 the gateway retains its September runtime.
 
@@ -147,8 +148,8 @@ up the stack but does not edit its base Compose file.
 
 | Container | Owner | Ports | Data | Healthcheck / recovery |
 |---|---|---|---|---|
-| `ci-digest` | `AiNativeBook_Draft_26/services/digest-service` | `127.0.0.1:8080` | named volume `cheap-intelligence_digest_data` mounted at `/data` | Node `/healthz`; restic backs up the named-volume mountpoint |
-| `ci-digest-postgres` | `AiNativeBook_Draft_26/services/digest-service` | no host port; private `cheap-intelligence_net` only | named volume `cheap-intelligence_digest_postgres` | PostgreSQL healthcheck; restic backs up the named-volume mountpoint |
+| `ci-digest` | `AiNativeBook_Draft_26/services/digest-service` | `127.0.0.1:8080` | named volume `cheap-intelligence_digest_data` mounted at `/data` | Node `/healthz`; candidate backup input; Hermes B2 backup scheduling is disabled |
+| `ci-digest-postgres` | `AiNativeBook_Draft_26/services/digest-service` | no host port; private `cheap-intelligence_net` only | named volume `cheap-intelligence_digest_postgres` | PostgreSQL healthcheck; candidate backup input; Hermes B2 backup scheduling is disabled |
 | `ci-caddy-inner` | `AiNativeBook_Draft_26/services/digest-service` | `127.0.0.1:8444` | Caddy certificate/config named volumes; certificates are reissuable | internal `http://127.0.0.1:8081/healthz`; public TLS arrives through routing-owned outer Caddy `:443` |
 
 `ci-digest-worker` is an app-owned delivery profile rather than an always-on container. It is

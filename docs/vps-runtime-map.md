@@ -31,10 +31,14 @@ Repository configuration and installed scripts are not yet identical:
   Hermes still has a verified Docker → nss-lookup → Unbound → Docker unit
   cycle. Routing-owned resolver configuration needs a separate owner fix;
   monitoring does not alter it or restart Docker.
-- The installed Hermes backup script covers the two digest volumes and Career
-  Copilot workspace. Inventory now selects the actual office state root and
-  the Career Copilot durable request/check volume too; these additions require
-  a reviewed backup deployment and restore verification before claiming coverage.
+- B2 was consolidated on 2026-11-15 at the operator's explicit request:
+  only the verified Hetzner repository under `vps-hetzner-prod/` remains.
+  Both old prefixes and their versions were removed, including Hermes history.
+  Hermes backup scheduling is disabled (`backup_enabled: false`); candidate
+  paths are retained for an explicitly approved future setup. Hetzner's daily
+  job targets the new prefix but retains its narrower legacy path scope.
+  The identical Mac copy was restore-tested; new B2 object hashes/sizes match.
+  Further cloud reads are blocked by the account download cap until resolved.
 - `99-verify.yml` checks host guardrails but currently does not assert the
   full expected-container set or Docker health. A green gate is not proof of
   application business behavior or complete backup coverage.
